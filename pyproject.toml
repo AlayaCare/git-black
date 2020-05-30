@@ -12,6 +12,9 @@ click = "^7.1.2"
 [tool.poetry.dev-dependencies]
 flake8 = "^3.8.2"
 
+[tool.poetry.scripts]
+"git-black" = "git_black:cli"
+
 [build-system]
 requires = ["poetry>=0.12"]
 build-backend = "poetry.masonry.api"

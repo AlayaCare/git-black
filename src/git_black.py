@@ -2,6 +2,8 @@ import re
 from subprocess import PIPE, Popen
 
 import click
+from git import Repo
+from git.diff import Diff
 
 commit_re = re.compile(rb"(?P<commit>[0-9a-f]{40})\s+\d+\s+(?P<lineno>\d+)")
 
@@ -21,13 +23,17 @@ def git_blame(filename):
 
 
 @click.command()
-@click.argument("filename")
+@click.argument("filename", required=False, default="")
 def cli(filename):
-    blame = git_blame(filename)
-    for commit, lines in blame.items():
-        print(commit)
-        for line in lines:
-            print("   ", line)
+    repo = Repo(search_parent_directories=True)
+    print(repo)
+    for diff in repo.index.diff(None):
+        print(diff)
+    # blame = git_blame(filename)
+    # for commit, lines in blame.items():
+    #    print(commit)
+    #    for line in lines:
+    #        print("   ", line)
 
 
 if __name__ == "__main__":
