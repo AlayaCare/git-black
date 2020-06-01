@@ -37,36 +37,41 @@ class GitBlack:
             # but I'll "encode" back to bytes when needed.
             # Even if the input is UTF-8 or anything else, this should work.
 
-            patch_set = PatchSet(
-                Popen(
-                    ["git", "diff", "--patience", "-U0", filename],
-                    stdout=PIPE
-                    # ["git", "diff", "--patience", "--no-index", "-U0", a, b], stdout=PIPE
-                ).stdout,
-                encoding="latin-1",
-            )
+            while True:
+                patch_set = PatchSet(
+                    Popen(
+                        ["git", "diff", "--patience", "-U0", filename],
+                        stdout=PIPE
+                        # ["git", "diff", "--patience",
+                        #  "--no-index", "-U0", a, b], stdout=PIPE
+                    ).stdout,
+                    encoding="latin-1",
+                )
 
-            for mf in patch_set.modified_files:
-                for hunk in mf:
-                    print(hunk.source_start, hunk.source_length)
-                    print(hunk.target_start, hunk.target_length)
-                    target_lines = [
-                        line.value.encode("latin-1") for line in hunk.target_lines()
-                    ]
-                    self.stage_lines(
-                        filename,
-                        orig_lines,
-                        hunk.source_start,
-                        hunk.source_length,
-                        target_lines,
-                    )
-                    # sys.exit(1)
-                    print("committing hunk:", hunk)
-                    self.repo.index.commit(
-                        "hunk {}-{}".format(hunk.source_start, hunk.source_length)
-                    )
-                    # repo.index.write()
-                    # each one of these hunks will become one or more commits
+                mf = patch_set.modified_files[0]
+                hunk = next(mf, None)
+                if not hunk:
+                    break
+
+                print(hunk.source_start, hunk.source_length)
+                print(hunk.target_start, hunk.target_length)
+                target_lines = [
+                    line.value.encode("latin-1") for line in hunk.target_lines()
+                ]
+                self.stage_lines(
+                    filename,
+                    orig_lines,
+                    hunk.source_start,
+                    hunk.source_length,
+                    target_lines,
+                )
+                # sys.exit(1)
+                print("committing hunk:", hunk)
+                self.repo.index.commit(
+                    "hunk {}-{}".format(hunk.source_start, hunk.source_length)
+                )
+                # repo.index.write()
+                # each one of these hunks will become one or more commits
 
     def stage_lines(
         self,
