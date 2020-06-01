@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import sys
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
@@ -15,36 +16,49 @@ commit_re = re.compile(rb"(?P<commit>[0-9a-f]{40})\s+\d+\s+(?P<lineno>\d+)")
 def reformat(a):
     run(["black", a])
 
-import shutil
 
-def list_patches(repo, filename):
-    with TemporaryDirectory(dir=".") as tmpdir:
-        #a = os.path.join(tmpdir, "a.py")
-        #b = os.path.join(tmpdir, "b.py")
-        #shutil.copy(filename, a)
-        #shutil.copy(a, b)
-        reformat(filename)
+class GitBlack:
+    def __init__(self):
+        self.repo = Repo(search_parent_directories=True)
 
-        patch_set = PatchSet(
-            Popen(
-                ["git", "diff", "--patience", "-U0", filename], stdout=PIPE
-                #["git", "diff", "--patience", "--no-index", "-U0", a, b], stdout=PIPE
-            ).stdout,
-            encoding='latin-1'
-        )
+    def commit_filename(self, filename):
+        with TemporaryDirectory(dir=".") as tmpdir:
+            # a = os.path.join(tmpdir, "a.py")
+            # b = os.path.join(tmpdir, "b.py")
+            # shutil.copy(filename, a)
+            # shutil.copy(a, b)
+            reformat(filename)
 
-        for mf in patch_set.modified_files:
-            for hunk in mf:
-                print(hunk.source_start, hunk.source_length)
-                print(hunk.target_start, hunk.target_length)
-                target_lines = [
-                    line.value.encode('latin-1') 
-                    for line in hunk.target_lines()
-                ]
-                stage_lines(repo, filename, hunk.source_start, hunk.source_length, target_lines)
-                sys.exit(1)
-                #repo.index.commit("hunk {} ({}-{})".format(filename, source_start, source_length))
-                # each one of these hunks will become one or more commits
+            patch_set = PatchSet(
+                Popen(
+                    ["git", "diff", "--patience", "-U0", filename],
+                    stdout=PIPE
+                    # ["git", "diff", "--patience", "--no-index", "-U0", a, b], stdout=PIPE
+                ).stdout,
+                encoding="latin-1",
+            )
+
+            for mf in patch_set.modified_files:
+                for hunk in mf:
+                    print(hunk.source_start, hunk.source_length)
+                    print(hunk.target_start, hunk.target_length)
+                    target_lines = [
+                        line.value.encode("latin-1") for line in hunk.target_lines()
+                    ]
+                    stage_lines(
+                        repo,
+                        filename,
+                        hunk.source_start,
+                        hunk.source_length,
+                        target_lines,
+                    )
+                    # sys.exit(1)
+                    print("committing hunk:", hunk)
+                    repo.index.commit(
+                        "hunk {}-{}".format(hunk.source_start, hunk.source_length)
+                    )
+                    # repo.index.write()
+                    # each one of these hunks will become one or more commits
 
 
 def path_rewriter(entry):
@@ -52,21 +66,27 @@ def path_rewriter(entry):
     return entry.path
 
 
-def stage_lines(repo, filename: str, source_start: int, source_length: int, target_lines: list):
-    f = open(filename, "rb")
-    lines = f.readlines()
-    f.close()
-    print("filename={!r} start={} length={}".format(filename, source_start, source_length))
+def stage_lines(
+    repo, filename: str, source_start: int, source_length: int, target_lines: list
+):
+    f = Popen(["git", "show", "HEAD:" + filename], stdout=PIPE)
+    lines = [None] + f.stdout.readlines()
+    print("lines={!r}".format(lines))
+    print(
+        "filename={!r} start={} length={}".format(filename, source_start, source_length)
+    )
     print("target_lines: {!r}".format(target_lines))
 
-    with NamedTemporaryFile(delete=False, dir=".") as tmpf:
-        tmpf.file.writelines(lines[0:source_start])
-        tmpf.file.writelines(target_lines)
-        tmpf.file.writelines(lines[source_start + source_length:])
-        repo.index.add(tmpf.name, path_rewriter=lambda entry: filename, write=True)
-    #tmpf.close()
+    def write_lines(f, lines):
+        print("writing:\n", lines)
+        f.writelines(lines)
 
-    #os.rename(tmpf.name, filename)
+    with NamedTemporaryFile(dir=".") as tmpf:
+        write_lines(tmpf.file, lines[1:source_start])
+        write_lines(tmpf.file, target_lines)
+        write_lines(tmpf.file, lines[source_start + source_length :])
+        tmpf.flush()
+        repo.index.add(tmpf.name, path_rewriter=lambda entry: filename, write=True)
 
 
 def commit_hunk(hunk: Hunk):
@@ -77,6 +97,7 @@ def commit_hunk(hunk: Hunk):
     b_l = hunk.target_length
 
     pass
+
 
 def git_blame(filename):
     p = Popen(["git", "blame", "-p", filename], stdout=PIPE)
@@ -96,8 +117,8 @@ def git_blame(filename):
 @click.argument("filename")
 def cli(filename):
     repo = Repo(search_parent_directories=True)
-    #print(repo)
-    #for diff in repo.index.diff(None):
+    # print(repo)
+    # for diff in repo.index.diff(None):
     #    print(diff)
     list_patches(repo, filename)
 
