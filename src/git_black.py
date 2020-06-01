@@ -48,10 +48,10 @@ class GitBlack:
                     encoding="latin-1",
                 )
 
-                mf = patch_set.modified_files[0]
-                hunk = next(mf, None)
-                if not hunk:
+                if not patch_set.modified_files:
                     break
+                mf = patch_set.modified_files[0]
+                hunk = mf[0]
 
                 print(hunk.source_start, hunk.source_length)
                 print(hunk.target_start, hunk.target_length)
@@ -59,11 +59,7 @@ class GitBlack:
                     line.value.encode("latin-1") for line in hunk.target_lines()
                 ]
                 self.stage_lines(
-                    filename,
-                    orig_lines,
-                    hunk.source_start,
-                    hunk.source_length,
-                    target_lines,
+                    filename, hunk.source_start, hunk.source_length, target_lines,
                 )
                 # sys.exit(1)
                 print("committing hunk:", hunk)
@@ -74,17 +70,14 @@ class GitBlack:
                 # each one of these hunks will become one or more commits
 
     def stage_lines(
-        self,
-        filename: str,
-        source_lines: list,
-        source_start: int,
-        source_length: int,
-        target_lines: list,
+        self, filename: str, source_start: int, source_length: int, target_lines: list,
     ):
+        f = Popen(["git", "show", "HEAD:" + filename], stdout=PIPE)
+        lines = f.stdout.readlines()
         with NamedTemporaryFile(dir=".") as tmpf:
-            tmpf.file.writelines(source_lines[0 : source_start - 1])
+            tmpf.file.writelines(lines[0 : source_start - 1])
             tmpf.file.writelines(target_lines)
-            tmpf.file.writelines(source_lines[source_start + source_length - 1 :])
+            tmpf.file.writelines(lines[source_start + source_length - 1 :])
             tmpf.flush()
             self.repo.index.add(
                 tmpf.name, path_rewriter=lambda entry: filename, write=True
