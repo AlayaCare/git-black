@@ -80,10 +80,17 @@ class GitBlack:
     ):
         f = Popen(["git", "show", "HEAD:" + filename], stdout=PIPE)
         lines = f.stdout.readlines()
+
+        def write_lines(f, lines):
+            # print("write_lines(f,\n", lines, "\n)")
+            f.writelines(lines)
+
+        if source_length == 0:
+            source_start += 1
         with NamedTemporaryFile(dir=".") as tmpf:
-            tmpf.file.writelines(lines[0 : source_start - 1])
-            tmpf.file.writelines(target_lines)
-            tmpf.file.writelines(lines[source_start + source_length - 1 :])
+            write_lines(tmpf.file, lines[0 : source_start - 1])
+            write_lines(tmpf.file, target_lines)
+            write_lines(tmpf.file, lines[source_start + source_length - 1 :])
             tmpf.flush()
             self.repo.index.add(
                 tmpf.name, path_rewriter=lambda entry: filename, write=True
