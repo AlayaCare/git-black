@@ -37,6 +37,7 @@ class GitBlack:
             # but I'll "encode" back to bytes when needed.
             # Even if the input is UTF-8 or anything else, this should work.
 
+            last_count = None
             while True:
                 patch_set = PatchSet(
                     Popen(
@@ -51,6 +52,11 @@ class GitBlack:
                 if not patch_set.modified_files:
                     break
                 mf = patch_set.modified_files[0]
+                hunk_count = len(mf)
+                if last_count is not None:
+                    if last_count - hunk_count != 1:
+                        raise RuntimeError("Hunk count should decrease by 1")
+                last_count = hunk_count
                 hunk = mf[0]
 
                 print(hunk.source_start, hunk.source_length)
