@@ -22,11 +22,10 @@ class GitBlack:
         self.repo = Repo(search_parent_directories=True)
 
     def commit_filename(self, filename):
-        orig_lines = open(filename, "rb").readlines()
         with TemporaryDirectory(dir=".") as tmpdir:
-            # a = os.path.join(tmpdir, "a.py")
-            # b = os.path.join(tmpdir, "b.py")
-            # shutil.copy(filename, a)
+            a = os.path.join(tmpdir, "a")
+            b = os.path.join(tmpdir, "b")
+            shutil.copy(filename, a)
             # shutil.copy(a, b)
             reformat(filename)
 
@@ -37,36 +36,28 @@ class GitBlack:
             # but I'll "encode" back to bytes when needed.
             # Even if the input is UTF-8 or anything else, this should work.
 
-            last_count = None
-            while True:
-                patch_set = PatchSet(
-                    Popen(
-                        ["git", "diff", "--patience", "-U0", filename],
-                        stdout=PIPE
-                        # ["git", "diff", "--patience",
-                        #  "--no-index", "-U0", a, b], stdout=PIPE
-                    ).stdout,
-                    encoding="latin-1",
-                )
+            patch_set = PatchSet(
+                Popen(
+                    ["git", "diff", "--patience", "-U0", filename], stdout=PIPE
+                ).stdout,
+                encoding="latin-1",
+            )
 
-                if not patch_set.modified_files:
-                    break
-                mf = patch_set.modified_files[0]
-                hunk_count = len(mf)
-                if last_count is not None:
-                    if last_count - hunk_count != 1:
-                        raise RuntimeError("Hunk count should decrease by 1")
-                last_count = hunk_count
-                hunk = mf[0]
+            mf = patch_set.modified_files[0]
 
+            for hunk in sorted(mf, key=lambda hunk: -hunk.source_start):
                 print(hunk.source_start, hunk.source_length)
                 print(hunk.target_start, hunk.target_length)
                 target_lines = [
                     line.value.encode("latin-1") for line in hunk.target_lines()
                 ]
-                self.stage_lines(
-                    filename, hunk.source_start, hunk.source_length, target_lines,
-                )
+                self.apply(a, b, hunk.source_start, hunk.source_length, target_lines)
+                os.rename(b, a)
+
+                self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
+                # self.stage_lines(
+                #    filename, hunk.source_start, hunk.source_length, target_lines,
+                # )
                 # sys.exit(1)
                 print("committing hunk:", hunk)
                 self.repo.index.commit(
@@ -74,6 +65,23 @@ class GitBlack:
                 )
                 # repo.index.write()
                 # each one of these hunks will become one or more commits
+
+    def apply(
+        self, a: str, b: str, source_start: int, source_length: int, target_lines: list
+    ):
+        """copy `a` to `b`, but apply the (source_start, source_length, lines) patch"""
+        with open(a, "rb") as f:
+            source_lines = f.readlines()
+
+        # I don't understand why, but unified diff needs
+        # this when the source length is 0
+        if source_length == 0:
+            source_start += 1
+
+        with open(b, "wb") as f:
+            f.writelines(source_lines[0 : source_start - 1])
+            f.writelines(target_lines)
+            f.writelines(source_lines[source_start + source_length - 1 :])
 
     def stage_lines(
         self, filename: str, source_start: int, source_length: int, target_lines: list,
