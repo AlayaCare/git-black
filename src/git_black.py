@@ -49,8 +49,6 @@ class GitBlack:
             mf = patch_set.modified_files[0]
 
             for hunk in sorted(mf, key=lambda hunk: -hunk.source_start):
-                print(hunk.source_start, hunk.source_length)
-                print(hunk.target_start, hunk.target_length)
                 target_lines = [
                     line.value.encode("latin-1") for line in hunk.target_lines()
                 ]
@@ -58,16 +56,9 @@ class GitBlack:
                 os.rename(b, a)
 
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
-                # self.stage_lines(
-                #    filename, hunk.source_start, hunk.source_length, target_lines,
-                # )
-                # sys.exit(1)
-                print("committing hunk:", hunk)
                 self.repo.index.commit(
                     "hunk {}-{}".format(hunk.source_start, hunk.source_length)
                 )
-                # repo.index.write()
-                # each one of these hunks will become one or more commits
 
     def apply(
         self, a: str, b: str, source_start: int, source_length: int, target_lines: list
@@ -85,30 +76,6 @@ class GitBlack:
             f.writelines(source_lines[0 : source_start - 1])
             f.writelines(target_lines)
             f.writelines(source_lines[source_start + source_length - 1 :])
-
-    def stage_lines(
-        self, filename: str, source_start: int, source_length: int, target_lines: list,
-    ):
-        f = Popen(["git", "show", "HEAD:" + filename], stdout=PIPE)
-        lines = f.stdout.readlines()
-
-        def write_lines(f, lines):
-            # print("write_lines(f,\n", lines, "\n)")
-            f.writelines(lines)
-
-        # I don't understand why, but unified diff needs
-        # this when the source length is 0
-        if source_length == 0:
-            source_start += 1
-
-        with NamedTemporaryFile(dir=".") as tmpf:
-            write_lines(tmpf.file, lines[0 : source_start - 1])
-            write_lines(tmpf.file, target_lines)
-            write_lines(tmpf.file, lines[source_start + source_length - 1 :])
-            tmpf.flush()
-            self.repo.index.add(
-                tmpf.name, path_rewriter=lambda entry: filename, write=True
-            )
 
 
 def git_blame(filename):
