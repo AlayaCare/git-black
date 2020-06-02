@@ -25,6 +25,11 @@ class GitBlack:
         self.repo = Repo(search_parent_directories=True)
 
     def commit_filename(self, filename):
+        blame_map = sorted(
+            self.repo.blame_incremental("HEAD", filename),
+            key=lambda blame_entry: blame_entry.linenos.start,
+        )
+
         with TemporaryDirectory(dir=".") as tmpdir:
             a = os.path.join(tmpdir, "a")
             b = os.path.join(tmpdir, "b")
