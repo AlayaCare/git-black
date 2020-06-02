@@ -43,6 +43,9 @@ class GitBlack:
                 encoding="latin-1",
             )
 
+            if not patch_set.modified_files:
+                return
+
             mf = patch_set.modified_files[0]
 
             for hunk in sorted(mf, key=lambda hunk: -hunk.source_start):
