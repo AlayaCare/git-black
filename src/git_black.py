@@ -1,13 +1,16 @@
+import datetime
 import os
 import re
 import shutil
 import sys
+import time
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 import click
 from git import Repo
 from git.diff import Diff
+from git.util import Actor
 from unidiff import Hunk, PatchSet
 
 commit_re = re.compile(rb"(?P<commit>[0-9a-f]{40})\s+\d+\s+(?P<lineno>\d+)")
@@ -57,7 +60,9 @@ class GitBlack:
 
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
                 self.repo.index.commit(
-                    "hunk {}-{}".format(hunk.source_start, hunk.source_length)
+                    "hunk {}-{}".format(hunk.source_start, hunk.source_length),
+                    author=Actor("John Doe", "johndoe@example.com"),
+                    author_date=datetime.datetime.now().isoformat(timespec="seconds"),
                 )
 
     def apply(
