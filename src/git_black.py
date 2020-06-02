@@ -85,8 +85,11 @@ class GitBlack:
             # print("write_lines(f,\n", lines, "\n)")
             f.writelines(lines)
 
+        # I don't understand why, but unified diff needs
+        # this when the source length is 0
         if source_length == 0:
             source_start += 1
+
         with NamedTemporaryFile(dir=".") as tmpf:
             write_lines(tmpf.file, lines[0 : source_start - 1])
             write_lines(tmpf.file, target_lines)
