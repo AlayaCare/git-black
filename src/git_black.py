@@ -1,9 +1,9 @@
-import datetime
 import os
 import re
 import shutil
 import sys
 import time
+from datetime import datetime
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
@@ -62,7 +62,9 @@ class GitBlack:
                 self.repo.index.commit(
                     "hunk {}-{}".format(hunk.source_start, hunk.source_length),
                     author=Actor("John Doe", "johndoe@example.com"),
-                    author_date=datetime.datetime.now().isoformat(timespec="seconds"),
+                    author_date=datetime.now()
+                    .replace(minute=0)
+                    .isoformat(timespec="seconds"),
                 )
 
     def apply(
