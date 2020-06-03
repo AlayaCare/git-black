@@ -83,7 +83,7 @@ class GitBlack:
 
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
                 self.repo.index.commit(
-                    "hunk {}-{}".format(hunk.source_start, hunk.source_length),
+                    original_commit.message,
                     author=original_commit.author,
                     author_date=format_datetime(original_commit.authored_datetime),
                 )
