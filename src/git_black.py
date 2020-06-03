@@ -5,6 +5,7 @@ import sys
 import time
 from bisect import bisect
 from datetime import datetime
+from email.utils import format_datetime
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
@@ -24,6 +25,8 @@ def reformat(a):
 class GitBlack:
     def __init__(self):
         self.repo = Repo(search_parent_directories=True)
+        self._blame_starts = {}
+        self._blame_commits = {}
 
     def commit_for_line(self, filename, lineno) -> Commit:
         if not filename in self._blame_starts:
@@ -82,7 +85,7 @@ class GitBlack:
                 self.repo.index.commit(
                     "hunk {}-{}".format(hunk.source_start, hunk.source_length),
                     author=original_commit.author,
-                    author_date=original_commit.authored_datetime,
+                    author_date=format_datetime(original_commit.authored_datetime),
                 )
 
     def apply(
