@@ -7,6 +7,7 @@ from bisect import bisect
 from datetime import datetime
 from difflib import SequenceMatcher
 from email.utils import format_datetime
+from importlib.resources import read_text
 from io import StringIO
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
@@ -15,11 +16,17 @@ import click
 from git import Commit, Repo
 from git.diff import Diff
 from git.util import Actor
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FunctionLoader
 from unidiff import Hunk, PatchSet
 
 commit_re = re.compile(rb"(?P<commit>[0-9a-f]{40})\s+\d+\s+(?P<lineno>\d+)")
-jinja_env = Environment(loader=FileSystemLoader("."))
+
+
+def load_template(template):
+    return read_text(__package__, template, "utf-8")
+
+
+jinja_env = Environment(loader=FunctionLoader(load_template))
 
 
 def reformat(a):
