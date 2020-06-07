@@ -48,17 +48,28 @@
     .magenta {
         background-color: #faf;
     }
+    #wrapper {
+        display: flex;
+    }
+    #left {
+        flex: 0 0 50%;
+    }
+    #right {
+        flex: 1;
+    }
 </style>
 </head>
 <body>
 
-<hr>
-<div>a.py</div>
-<div class="source">{{ a|safe }}</div>
+<div id="wrapper">
+    <div id="left">
+        <div>a.py</div>
+        <div class="source">{{ a|safe }}</div>
+    </div>
 
-<hr>
-<div>b.py</div>
-
-<div class="source">{{ b|safe }}</div>
+    <div id="right">
+        <div>b.py</div>
+        <div class="source">{{ b|safe }}</div>
+    </div>
 </body>
 </html>
