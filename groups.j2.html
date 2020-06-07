@@ -1,0 +1,64 @@
+<html>
+<head>
+    <meta charset="utf8">
+    <script src="https://livejs.com/live.js"></script>
+<style>
+    .source {
+        font-family: monospace; 
+        font-size: xx-large;
+        white-space: pre;
+        line-height: 1.35;
+    }
+    .mg {
+        border: 2px solid black;
+        border-color: black;
+        border-style: solid;
+    }
+    .closed {
+        border-radius: 6px;
+    }
+    .open {
+        border-width: 2px 0 2px 0;
+    }
+    .open-right {
+        border-width: 2px 0 2px 2px;
+        border-top-left-radius: 6px;
+        border-bottom-left-radius: 6px;
+    }
+    .open-left {
+        border-width: 2px 2px 2px 0;
+        border-top-right-radius: 6px;
+        border-bottom-right-radius: 6px;
+    }
+    .red {
+        background-color: #faa;
+    }
+    .blue {
+        background-color: #aaf;
+    }
+    .green {
+        background-color: #afa;
+    }
+    .yellow {
+        background-color: #ffa;
+    }
+    .cyan {
+        background-color: #aff;
+    }
+    .magenta {
+        background-color: #faf;
+    }
+</style>
+</head>
+<body>
+
+<hr>
+<div>a.py</div>
+<div class="source">{{ a|safe }}</div>
+
+<hr>
+<div>b.py</div>
+
+<div class="source">{{ b|safe }}</div>
+</body>
+</html>
