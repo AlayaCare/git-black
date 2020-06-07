@@ -2,6 +2,8 @@ from collections import (
         namedtuple
 )
 
+from somewhere import loooooooooooooooooong, loooooooooooooooooooooong, loooooooooooooooooong, looooooooooooooooong, looooooooooooooooong, looooooooooooong, looooooooooong
+
 def func1(
         a,
         b):

@@ -12,6 +12,7 @@ unidiff = "^0.6.0"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^3.8.2"
+jinja2 = "^2.11.2"
 
 [tool.poetry.scripts]
 "git-black" = "git_black:cli"
