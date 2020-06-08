@@ -9,6 +9,7 @@ python = "^3.7"
 gitpython = "^3.1.2"
 click = "^7.1.2"
 unidiff = "^0.6.0"
+dulwich = "^0.20.2"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^3.8.2"

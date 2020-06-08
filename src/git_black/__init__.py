@@ -18,6 +18,7 @@ from git.diff import Diff
 from git.util import Actor
 from jinja2 import Environment, FunctionLoader
 from unidiff import Hunk, PatchSet
+from unidiff.patch import Line
 
 commit_re = re.compile(rb"(?P<commit>[0-9a-f]{40})\s+\d+\s+(?P<lineno>\d+)")
 
@@ -27,10 +28,11 @@ def load_template(template):
 
 
 jinja_env = Environment(loader=FunctionLoader(load_template))
+jinja_env.filters["zip"] = zip
 
 
 def reformat(a):
-    run(["black", a])
+    run(["black", "-l89", a])
 
 
 class GitBlack:
@@ -38,8 +40,8 @@ class GitBlack:
         self.repo = Repo(search_parent_directories=True)
         self._blame_starts = {}
         self._blame_commits = {}
-        self.a_html = StringIO()
-        self.b_html = StringIO()
+        self.a_html = []
+        self.b_html = []
         self.color_idx = 0
 
     def commit_for_line(self, filename, lineno) -> Commit:
@@ -59,30 +61,53 @@ class GitBlack:
         idx = bisect(self._blame_starts[filename], lineno) - 1
         return self._blame_commits[filename][idx]
 
-    def render_groups(self, a, b, sm: SequenceMatcher):
-        colors = "cyan magenta yellow".split()
-        a_start = 0
-        b_start = 0
-        for m in sm.get_matching_blocks():
-            self.a_html.write(a[a_start : m.a])
-            if m.size > 0:
-                self.a_html.write(
-                    """<span class="mg closed {}">""".format(colors[self.color_idx])
-                )
-                self.a_html.write(a[m.a : m.a + m.size])
-                self.a_html.write("</span>")
-            a_start = m.a + m.size
+    def render_groups(self, a, b, matches):
+        colors = "cyan magenta yellow red blue green".split()
+        a_html = ""
+        b_html = ""
+        color_idx = 0
+        al0 = 0
+        ac0 = 0
+        bl0 = 0
+        bc0 = 0
 
-            self.b_html.write(b[b_start : m.b])
-            if m.size > 0:
-                self.b_html.write(
-                    """<span class="mg closed {}">""".format(colors[self.color_idx])
-                )
-                self.b_html.write(b[m.b : m.b + m.size])
-                self.b_html.write("</span>")
-            b_start = m.b + m.size
+        def extract(text, from_line, from_col, to_line, to_col):
+            result = ""
+            if from_line == to_line:
+                return text[from_line][from_col:to_col]
+            for l in range(from_line, to_line + 1):
+                if l == from_line:
+                    result += text[l][from_col:]
+                elif l < to_line:
+                    result += text[l]
+                else:
+                    result += text[l][:to_col]
+            return result
 
-            self.color_idx = (self.color_idx + 1) % len(colors)
+        for al, ac, bl, bc, length in matches:
+            a_html += extract(a, al0, ac0, al, ac)
+            a_html += '<span class="mg {}">'.format(colors[color_idx])
+            a_html += a[al][ac : ac + length]
+            a_html += "</span>"
+            al0 = al
+            ac0 = ac + length
+
+            b_html += extract(b, bl0, bc0, bl, bc)
+            b_html += '<span class="mg {}">'.format(colors[color_idx])
+            b_html += b[bl][bc : bc + length]
+            b_html += "</span>"
+            bl0 = bl
+            bc0 = bc + length
+
+            color_idx = (color_idx + 1) % len(colors)
+
+        if a:
+            a_html += extract(a, al0, ac0, len(a) - 1, len(a[-1]))
+        if b:
+            b_html += extract(b, bl0, bc0, len(b) - 1, len(b[-1]))
+
+        self.a_html.append(a_html)
+        self.b_html.append(b_html)
 
     def compute_source_mapping(self, hunk: Hunk):
         """
@@ -101,27 +126,71 @@ class GitBlack:
         the fact that source lines 4 and 5 never appear in the result means
         those lines were deleted.
         """
-        a = "".join(line.value for line in hunk.source_lines())
-        b = "".join(line.value for line in hunk.target_lines())
-        sm = SequenceMatcher(a=a, b=b, autojunk=False)
+
+        source_lines = list(hunk.source_lines())
+        current_source_line = 0
+        current_source_column = 0
+        current_target_line = 0
+
+        matches = []
+
+        relevant_tokens = re.compile(r"\w+")
+
+        a_preview = []
+        b_preview = []
+        b_col = 0
+
+        for current_target_line, b_line in enumerate(hunk.target_lines()):
+            for b_match in relevant_tokens.finditer(b_line.value):
+                b_word = b_match.group()
+                if current_source_line >= len(source_lines):
+                    # we've reached the end, all remaining words/lines will be linked
+                    # to the last source line
+                    continue
+                while current_source_line < len(source_lines):
+                    a_line: Line = source_lines[current_source_line]
+                    pos = a_line.value.find(b_word, current_source_column)
+                    if pos == -1:
+                        current_source_line += 1
+                        current_source_column = 0
+                        continue
+                    match = (
+                        current_source_line,
+                        pos,
+                        current_target_line,
+                        b_match.start(),
+                        len(b_word),
+                    )
+                    matches.append(match)
+                    current_source_column += len(b_word)
+                    break
+
         print(hunk)
+        print("matches:", matches)
 
-        self.render_groups(a, b, sm)
+        a = list(line.value for line in hunk.source_lines())
+        b = list(line.value for line in hunk.target_lines())
+        # a_words = [m.group() for m in re.finditer(r"\w+", a)]
+        # b_words = [m.group() for m in re.finditer(r"\w+", b)]
+        # sm = SequenceMatcher(a=a_words, b=b_words, autojunk=False)
+        # print(hunk)
 
-        # determine "sync points"
-        print(repr(a))
-        print(repr(b))
-        sync_points = []
-        for m in sm.get_matching_blocks():
-            print(m)
-            a_end = m.a + m.size
-            b_end = m.b + m.size
-            if m.size == 0:
-                a_end = len(a)
-                b_end = len(b)
-            sync_points.append((a_end, b_end))
+        self.render_groups(a, b, matches)
 
-        print(sync_points)
+        # # determine "sync points"
+        # # print(repr(a))
+        # # print(repr(b))
+        # sync_points = []
+        # for m in sm.get_matching_blocks():
+        #     print(m)
+        #     a_end = m.a + m.size
+        #     b_end = m.b + m.size
+        #     if m.size == 0:
+        #         a_end = len(a)
+        #         b_end = len(b)
+        #     sync_points.append((a_end, b_end))
+
+        # print(sync_points)
 
         # result = []
         # current_line = []
@@ -140,10 +209,28 @@ class GitBlack:
         with TemporaryDirectory(dir=".") as tmpdir:
             a = os.path.join(tmpdir, "a")
             b = os.path.join(tmpdir, "b")
-            shutil.copy(filename, a)
-            shutil.copy(a, b)
+            # c = os.path.join(tmpdir, "c")
 
-            # reformat(b)
+            # def separate(text):
+            #     return re.sub(r"(\n{2,})", "\n---------git-black---------\n\1", text)
+
+            # t = open(filename, "r").read()
+            # f = open(a, "w")
+            # f.write(separate(t))
+            # f.close()
+
+            # shutil.copy(filename, c)
+            # reformat(c)
+
+            # t = open(c, "r").read()
+            # f = open(b, "w")
+            # f.write(separate(t))
+            # f.close()
+
+            shutil.copy(filename, a)
+            shutil.copy(filename, b)
+
+            reformat(b)
 
             # why latin-1 ?
             # The PatchSet object demands an encoding, even when I think
@@ -152,15 +239,9 @@ class GitBlack:
             # and I'll "encode" back to bytes when needed.
             # Even if the input is UTF-8 or anything else, this should work.
 
-            # patch_set = PatchSet(
-            #    Popen(
-            #        ["git", "diff", "--patience", "-U0", "--no-index", a, b],
-            #        stdout=PIPE,
-            #    ).stdout,
-            #    encoding="latin-1",
-            # )
             patch_set = PatchSet(
-                Popen(["black", "--diff", b], stdout=PIPE).stdout, encoding="latin-1"
+                Popen(["git", "diff", "-U0", "--no-index", a, b], stdout=PIPE,).stdout,
+                encoding="latin-1",
             )
 
             if not patch_set.modified_files:
@@ -173,8 +254,16 @@ class GitBlack:
             a_start = 0
             b_start = 0
             for hunk in sorted(mf, key=lambda hunk: hunk.source_start):
-                self.a_html.writelines(a_lines[a_start : hunk.source_start - 1])
-                self.b_html.writelines(b_lines[b_start : hunk.target_start - 1])
+                self.a_html.append(
+                    '<span class="unchanged">'
+                    + ("".join(a_lines[a_start : hunk.source_start - 1]))
+                    + "</span>"
+                )
+                self.b_html.append(
+                    '<span class="unchanged">'
+                    + ("".join(b_lines[b_start : hunk.target_start - 1]))
+                    + "</span>"
+                )
                 a_start = hunk.source_start + hunk.source_length - 1
                 b_start = hunk.target_start + hunk.target_length - 1
                 self.compute_source_mapping(hunk)
@@ -183,8 +272,8 @@ class GitBlack:
             f = open("groups.html", "w")
             f.write(
                 template.render(
-                    a=self.a_html.getvalue().replace("\n", "↲\n"),
-                    b=self.b_html.getvalue().replace("\n", "↲\n"),
+                    a=self.a_html,  # .getvalue().replace("\n", "↲\n"),
+                    b=self.b_html,  # .getvalue().replace("\n", "↲\n"),
                 )
             )
             return
