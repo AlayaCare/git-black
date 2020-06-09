@@ -61,7 +61,7 @@ class GitBlack:
         idx = bisect(self._blame_starts[filename], lineno) - 1
         return self._blame_commits[filename][idx]
 
-    def compute_source_mapping(self, hunk: Hunk):
+    def compute_origin(self, hunk: Hunk):
         """
         compute which line or lines from the hunk source end up
         in each line of the hunk target
@@ -79,119 +79,30 @@ class GitBlack:
         those lines were deleted.
         """
 
-        if hunk.source_length == 0:
-            return [(-1,)] * hunk.target_length
-
         result = []
+        # if hunk.source_length == 0:
+        #     result = [(-1,)] * hunk.target_length
+
         if hunk.source_length < hunk.target_length:
             for i in range(hunk.source_length):
                 result.append((i,))
             for i in range(hunk.target_length - hunk.source_length):
-                result.append(hunk.source_length - 1)
+                result.append((hunk.source_length - 1,))
         else:
             for i in range(hunk.target_length - 1):
                 result.append((i,))
             result.append(tuple(range(hunk.target_length - 1, hunk.source_length)))
-
-        target_lines = list(hunk.source_length)
-        current_source_line = 0
-        current_source_column = 0
-        current_target_line = 0
-
-        matches = []
-
-        relevant_tokens = re.compile(r"\w+")
-
-        a_preview = []
-        b_preview = []
-        b_col = 0
-
-        for current_target_line, b_line in enumerate(hunk.target_lines()):
-            for b_match in relevant_tokens.finditer(b_line.value):
-                b_word = b_match.group()
-                if current_source_line >= len(source_lines):
-                    # we've reached the end, all remaining words/lines will be linked
-                    # to the last source line
-                    continue
-                while current_source_line < len(source_lines):
-                    a_line: Line = source_lines[current_source_line]
-                    pos = a_line.value.find(b_word, current_source_column)
-                    if pos == -1:
-                        current_source_line += 1
-                        current_source_column = 0
-                        continue
-                    match = (
-                        current_source_line,
-                        pos,
-                        current_target_line,
-                        b_match.start(),
-                        len(b_word),
-                    )
-                    matches.append(match)
-                    current_source_column += len(b_word)
-                    break
-
-        print(hunk)
-        print("matches:", matches)
-
-        a = list(line.value for line in hunk.source_lines())
-        b = list(line.value for line in hunk.target_lines())
-        # a_words = [m.group() for m in re.finditer(r"\w+", a)]
-        # b_words = [m.group() for m in re.finditer(r"\w+", b)]
-        # sm = SequenceMatcher(a=a_words, b=b_words, autojunk=False)
+        # print("---- hunk ----")
         # print(hunk)
-
-        self.render_groups(a, b, matches)
-
-        # # determine "sync points"
-        # # print(repr(a))
-        # # print(repr(b))
-        # sync_points = []
-        # for m in sm.get_matching_blocks():
-        #     print(m)
-        #     a_end = m.a + m.size
-        #     b_end = m.b + m.size
-        #     if m.size == 0:
-        #         a_end = len(a)
-        #         b_end = len(b)
-        #     sync_points.append((a_end, b_end))
-
-        # print(sync_points)
-
-        # result = []
-        # current_line = []
-        # a_lineno = 1
-        # b_lineno = 1
-        # for m in sm.get_matching_blocks():
-        #     if m.size == 0:
-        #         break
-        #     a_lineno += a[m.a:m.a+m.size].count("\n")
-        #     b_lineno += a[]
-
-        #     print("   ", m)
-        #     for c in
+        # print("hunk.target_length:", hunk.target_length)
+        # print("---- result ----")
+        # print(result)
+        return result
 
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
             a = os.path.join(tmpdir, "a")
             b = os.path.join(tmpdir, "b")
-            # c = os.path.join(tmpdir, "c")
-
-            # def separate(text):
-            #     return re.sub(r"(\n{2,})", "\n---------git-black---------\n\1", text)
-
-            # t = open(filename, "r").read()
-            # f = open(a, "w")
-            # f.write(separate(t))
-            # f.close()
-
-            # shutil.copy(filename, c)
-            # reformat(c)
-
-            # t = open(c, "r").read()
-            # f = open(b, "w")
-            # f.write(separate(t))
-            # f.close()
 
             shutil.copy(filename, a)
             shutil.copy(filename, b)
@@ -219,29 +130,20 @@ class GitBlack:
             b_lines = open(b).readlines()
             a_start = 0
             b_start = 0
+            original_commits = {}
             for hunk in sorted(mf, key=lambda hunk: hunk.source_start):
-                self.a_html.append(
-                    '<span class="unchanged">'
-                    + ("".join(a_lines[a_start : hunk.source_start - 1]))
-                    + "</span>"
-                )
-                self.b_html.append(
-                    '<span class="unchanged">'
-                    + ("".join(b_lines[b_start : hunk.target_start - 1]))
-                    + "</span>"
-                )
-                a_start = hunk.source_start + hunk.source_length - 1
-                b_start = hunk.target_start + hunk.target_length - 1
-                self.compute_source_mapping(hunk)
+                origin = self.compute_origin(hunk)
+                for i, t in enumerate(origin):
+                    for l in t:
+                        target_line = hunk.target_start + i
+                        origin_line = max(1, hunk.source_start + l)
+                        original_commits[target_line] = self.commit_for_line(
+                            filename, origin_line
+                        )
 
-            template = jinja_env.get_template("groups.j2.html")
-            f = open("groups.html", "w")
-            f.write(
-                template.render(
-                    a=self.a_html,  # .getvalue().replace("\n", "↲\n"),
-                    b=self.b_html,  # .getvalue().replace("\n", "↲\n"),
-                )
-            )
+            for k in sorted(original_commits.keys()):
+                print(k, original_commits[k])
+
             return
 
             for hunk in sorted(mf, key=lambda hunk: -hunk.source_start):
