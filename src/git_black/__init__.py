@@ -61,54 +61,6 @@ class GitBlack:
         idx = bisect(self._blame_starts[filename], lineno) - 1
         return self._blame_commits[filename][idx]
 
-    def render_groups(self, a, b, matches):
-        colors = "cyan magenta yellow red blue green".split()
-        a_html = ""
-        b_html = ""
-        color_idx = 0
-        al0 = 0
-        ac0 = 0
-        bl0 = 0
-        bc0 = 0
-
-        def extract(text, from_line, from_col, to_line, to_col):
-            result = ""
-            if from_line == to_line:
-                return text[from_line][from_col:to_col]
-            for l in range(from_line, to_line + 1):
-                if l == from_line:
-                    result += text[l][from_col:]
-                elif l < to_line:
-                    result += text[l]
-                else:
-                    result += text[l][:to_col]
-            return result
-
-        for al, ac, bl, bc, length in matches:
-            a_html += extract(a, al0, ac0, al, ac)
-            a_html += '<span class="mg {}">'.format(colors[color_idx])
-            a_html += a[al][ac : ac + length]
-            a_html += "</span>"
-            al0 = al
-            ac0 = ac + length
-
-            b_html += extract(b, bl0, bc0, bl, bc)
-            b_html += '<span class="mg {}">'.format(colors[color_idx])
-            b_html += b[bl][bc : bc + length]
-            b_html += "</span>"
-            bl0 = bl
-            bc0 = bc + length
-
-            color_idx = (color_idx + 1) % len(colors)
-
-        if a:
-            a_html += extract(a, al0, ac0, len(a) - 1, len(a[-1]))
-        if b:
-            b_html += extract(b, bl0, bc0, len(b) - 1, len(b[-1]))
-
-        self.a_html.append(a_html)
-        self.b_html.append(b_html)
-
     def compute_source_mapping(self, hunk: Hunk):
         """
         compute which line or lines from the hunk source end up
@@ -127,7 +79,21 @@ class GitBlack:
         those lines were deleted.
         """
 
-        source_lines = list(hunk.source_lines())
+        if hunk.source_length == 0:
+            return [(-1,)] * hunk.target_length
+
+        result = []
+        if hunk.source_length < hunk.target_length:
+            for i in range(hunk.source_length):
+                result.append((i,))
+            for i in range(hunk.target_length - hunk.source_length):
+                result.append(hunk.source_length - 1)
+        else:
+            for i in range(hunk.target_length - 1):
+                result.append((i,))
+            result.append(tuple(range(hunk.target_length - 1, hunk.source_length)))
+
+        target_lines = list(hunk.source_length)
         current_source_line = 0
         current_source_column = 0
         current_target_line = 0
