@@ -27,3 +27,15 @@ def some_long_name(self):
     return self.some_long_value or \
            (self.object1.property1.property2
         if self.object1 and self.object1.property1 else None)
+
+
+
+
+def func5():
+    pass
+
+
+
+
+def func6():
+    pass
