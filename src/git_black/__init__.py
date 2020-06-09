@@ -44,9 +44,9 @@ class GitBlack:
         self.b_html = []
         self.color_idx = 0
 
-    def commit_for_line(self, filename, lineno) -> Commit:
+    def blame(self, filename, lineno) -> Commit:
         if not filename in self._blame_starts:
-            blame = sorted(
+            _blame = sorted(
                 [
                     (e.linenos.start, e.commit)
                     for e in self.repo.blame_incremental("HEAD", filename)
@@ -54,7 +54,7 @@ class GitBlack:
             )
             self._blame_starts[filename] = []
             self._blame_commits[filename] = []
-            for line, commit in blame:
+            for line, commit in _blame:
                 self._blame_starts[filename].append(line)
                 self._blame_commits[filename].append(commit)
 
@@ -88,15 +88,16 @@ class GitBlack:
                 result.append((i,))
             for i in range(hunk.target_length - hunk.source_length):
                 result.append((hunk.source_length - 1,))
-        else:
+        elif hunk.target_length > 0:
             for i in range(hunk.target_length - 1):
                 result.append((i,))
             result.append(tuple(range(hunk.target_length - 1, hunk.source_length)))
-        # print("---- hunk ----")
-        # print(hunk)
-        # print("hunk.target_length:", hunk.target_length)
-        # print("---- result ----")
-        # print(result)
+
+        print("---- hunk ----")
+        print(hunk)
+        print("hunk.target_length:", hunk.target_length)
+        print("---- result ----")
+        print(result)
         return result
 
     def commit_filename(self, filename):
@@ -137,12 +138,15 @@ class GitBlack:
                     for l in t:
                         target_line = hunk.target_start + i
                         origin_line = max(1, hunk.source_start + l)
-                        original_commits[target_line] = self.commit_for_line(
+                        original_commits[target_line] = self.blame(
                             filename, origin_line
                         )
 
-            for k in sorted(original_commits.keys()):
-                print(k, original_commits[k])
+            for l in range(1, len(b_lines) + 1):
+                if l in original_commits:
+                    print(l, original_commits[l])
+                else:
+                    print(l, self.blame(filename, l))
 
             return
 
@@ -154,7 +158,7 @@ class GitBlack:
                 self.apply(a, b, hunk.source_start, hunk.source_length, target_lines)
                 os.rename(b, a)
 
-                original_commit = self.commit_for_line(filename, hunk.source_start)
+                original_commit = self.blame(filename, hunk.source_start)
 
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
                 self.repo.index.commit(
