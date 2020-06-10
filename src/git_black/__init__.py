@@ -135,11 +135,6 @@ class GitBlack:
                 result.append((i,))
             result.append(tuple(range(hunk.target_length - 1, hunk.source_length)))
 
-        print("---- hunk ----")
-        print(hunk)
-        print("hunk.target_length:", hunk.target_length)
-        print("---- result ----")
-        print(result)
         return result
 
     def commit_filename(self, filename):
@@ -168,23 +163,28 @@ class GitBlack:
                 return
 
             mf = patch_set.modified_files[0]
+            hunks = list(mf)
 
-            working_file = HunkList(filename, list(mf))
+            working_file = HunkList(filename, hunks)
 
             # a_lines = open(a).readlines()
             # b_lines = open(b).readlines()
             # a_start = 0
             # b_start = 0
-            original_commits = {}
-            for hunk in sorted(mf, key=lambda hunk: hunk.source_start):
-                origin = self.compute_origin(hunk)
-                for i, t in enumerate(origin):
+
+            # lest map each hunk to its source commits
+            hunk_commits = {}
+            for hunk_idx, hunk in enumerate(hunks):
+                for t in self.compute_origin(hunk):
+                    hunk_commits.setdefault(hunk_idx, set())
                     for l in t:
-                        target_line = hunk.target_start + i
                         origin_line = max(1, hunk.source_start + l)
-                        original_commits[target_line] = self.blame(
-                            filename, origin_line
-                        )
+                        commit = self.blame(filename, origin_line)
+                        hunk_commits[hunk_idx].add(commit.hexsha)
+
+            from pprint import pprint
+
+            pprint(hunk_commits)
 
             # for l in range(1, len(b_lines) + 1):
             #     if l in original_commits:
@@ -192,7 +192,7 @@ class GitBlack:
             #     else:
             #         print(l, self.blame(filename, l))
 
-            # return
+            return
 
             for hunk in sorted(mf, key=lambda hunk: -hunk.source_start):
                 continue
