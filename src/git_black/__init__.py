@@ -233,6 +233,7 @@ class GitBlack:
                     author=main_commit.author,
                     author_date=format_datetime(main_commit.authored_datetime),
                 )
+            working_file.write(filename)
 
 
 @click.command()
