@@ -139,7 +139,7 @@ class GitBlack:
 
         return result
 
-    def _commit_empty_hunks(self, working_file, hunks):
+    def _commit_empty_hunks(self, filename, tmpfile, working_file, hunks):
         # if a hunk has no target lines, it means stuff was just deleted
         # we'll commit those as ourselves (with no targe lines, there's
         # no entry in the blame anyway)
@@ -147,10 +147,12 @@ class GitBlack:
             if hunk.target_length > 0:
                 continue
             working_file.apply(hunk_idx)
-            working_file.write(a)
-            self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
+            working_file.write(tmpfile)
+            self.repo.index.add(
+                tmpfile, path_rewriter=lambda entry: filename, write=True
+            )
 
-        self.repo.index.commit("deletes-only commit by git-black",)
+        self.repo.index.commit("delete-only commit by git-black",)
 
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
@@ -214,7 +216,7 @@ class GitBlack:
             #         print(l, self.blame(filename, l))
 
             #           return
-            self.commit_empty_hunks(hunks)
+            self._commit_empty_hunks(filename, a, working_file, hunks)
 
             for commit_hashes, hunk_idxs in grouped_hunks.items():
                 # continue
@@ -240,7 +242,7 @@ class GitBlack:
                     main_commit = sorted(commits, key=lambda c: c.authored_datetime)[-1]
 
                 commit_message += (
-                    "\n\n- automatic commit by git-black, original commits:\n"
+                    "\n\nautomatic commit by git-black, original commits:\n"
                 )
                 commit_message += "\n".join(["  {}".format(c.hexsha) for c in commits])
 
@@ -250,7 +252,7 @@ class GitBlack:
                     author_date=format_datetime(main_commit.authored_datetime),
                 )
 
-            # working_file.write(filename)
+            working_file.write(filename)
 
 
 @click.command()
