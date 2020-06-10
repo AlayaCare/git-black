@@ -200,7 +200,7 @@ class GitBlack:
 
             #           return
 
-            for commits, hunk_idxs in grouped_hunks.items():
+            for commit_hashes, hunk_idxs in grouped_hunks.items():
                 # continue
                 # target_lines = [
                 #    line.value.encode("latin-1") for line in hunk.target_lines()
@@ -214,13 +214,19 @@ class GitBlack:
                 working_file.write(a)
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
 
-                main_commit = self.repo.commit(commits[0])
+                commits = [self.repo.commit(h) for h in commit_hashes]
+
+                main_commit = commits[0]
                 commit_message = main_commit.message
+
                 if len(commits) > 1:
-                    main_commit = self.most_recent_commit(commits)
+                    # most recent commit
+                    main_commit = sorted(commits, key=lambda c: c.authored_datetime)[-1]
+                    commit_message += (
+                        "\n\n- automatic commit by git-black, original commits:\n"
+                    )
                     commit_message += "\n".join(
-                        ["(automatic commit by git-black)", "(original commits:)",]
-                        + ["(  {})" for c in commits]
+                        ["  {}".format(c.hexsha) for c in commits]
                     )
 
                 self.repo.index.commit(
@@ -228,10 +234,6 @@ class GitBlack:
                     author=main_commit.author,
                     author_date=format_datetime(main_commit.authored_datetime),
                 )
-
-    def most_recent_commit(self, hashes):
-        commits = [self.repo.commit(h) for h in hashes]
-        return sorted(commits, key=lambda c: c.authored_datetime)[-1]
 
 
 @click.command()
