@@ -222,12 +222,11 @@ class GitBlack:
                 if len(commits) > 1:
                     # most recent commit
                     main_commit = sorted(commits, key=lambda c: c.authored_datetime)[-1]
-                    commit_message += (
-                        "\n\n- automatic commit by git-black, original commits:\n"
-                    )
-                    commit_message += "\n".join(
-                        ["  {}".format(c.hexsha) for c in commits]
-                    )
+
+                commit_message += (
+                    "\n\n- automatic commit by git-black, original commits:\n"
+                )
+                commit_message += "\n".join(["  {}".format(c.hexsha) for c in commits])
 
                 self.repo.index.commit(
                     commit_message,
