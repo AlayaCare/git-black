@@ -192,9 +192,7 @@ class GitBlack:
             # lest map each hunk to its source commits
             hunk_commits = {}
             for hunk_idx, hunk in enumerate(hunks):
-                print(hunk)
                 for t in self.compute_origin(hunk):
-                    print("origins", t)
                     hunk_commits.setdefault(hunk_idx, set())
                     for l in t:
                         origin_line = max(1, hunk.source_start + l)
@@ -206,9 +204,6 @@ class GitBlack:
                 t = tuple(sorted(commits))
                 grouped_hunks.setdefault(t, []).append(hunk_idx)
 
-            from pprint import pprint
-
-            pprint(grouped_hunks)
             # for l in range(1, len(b_lines) + 1):
             #     if l in original_commits:
             #         print(l, original_commits[l])
