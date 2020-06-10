@@ -42,8 +42,8 @@ class HunkList:
         self._offsets = [0] * len(hunks)
         self._applied = {}
 
-    def hunk(self, idx) -> Hunk:
-        return self._hunks[idx]
+    # def hunk(self, idx) -> Hunk:
+    #     return self._hunks[idx]
 
     def apply(self, idx):
         if idx in self._applied:
@@ -139,6 +139,19 @@ class GitBlack:
 
         return result
 
+    def _commit_empty_hunks(self, working_file, hunks):
+        # if a hunk has no target lines, it means stuff was just deleted
+        # we'll commit those as ourselves (with no targe lines, there's
+        # no entry in the blame anyway)
+        for hunk_idx, hunk in enumerate(hunks):
+            if hunk.target_length > 0:
+                continue
+            working_file.apply(hunk_idx)
+            working_file.write(a)
+            self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
+
+        self.repo.index.commit("deletes-only commit by git-black",)
+
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
             a = os.path.join(tmpdir, "a")
@@ -177,7 +190,9 @@ class GitBlack:
             # lest map each hunk to its source commits
             hunk_commits = {}
             for hunk_idx, hunk in enumerate(hunks):
+                print(hunk)
                 for t in self.compute_origin(hunk):
+                    print("origins", t)
                     hunk_commits.setdefault(hunk_idx, set())
                     for l in t:
                         origin_line = max(1, hunk.source_start + l)
@@ -191,7 +206,7 @@ class GitBlack:
 
             from pprint import pprint
 
-            #            pprint(grouped_hunks)
+            pprint(grouped_hunks)
             # for l in range(1, len(b_lines) + 1):
             #     if l in original_commits:
             #         print(l, original_commits[l])
@@ -199,6 +214,7 @@ class GitBlack:
             #         print(l, self.blame(filename, l))
 
             #           return
+            self.commit_empty_hunks(hunks)
 
             for commit_hashes, hunk_idxs in grouped_hunks.items():
                 # continue
@@ -233,7 +249,8 @@ class GitBlack:
                     author=main_commit.author,
                     author_date=format_datetime(main_commit.authored_datetime),
                 )
-            working_file.write(filename)
+
+            # working_file.write(filename)
 
 
 @click.command()
