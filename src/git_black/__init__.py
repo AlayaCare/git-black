@@ -35,6 +35,45 @@ def reformat(a):
     run(["black", "-l89", a])
 
 
+class HunkList:
+    def __init__(self, source_file: str, hunks):
+        self._lines = open(source_file, "rb").readlines()
+        self._hunks = hunks
+        self._offsets = [0] * len(hunks)
+        self._applied = {}
+
+    def hunk(self, idx) -> Hunk:
+        return self._hunks[idx]
+
+    def apply(self, idx):
+        if idx in self._applied:
+            return
+        hunk = self._hunks[idx]
+
+        source_length = hunk.source_length
+        source_start = hunk.source_start + self._offsets[idx]
+
+        # I don't understand why, but unified diff needs
+        # this when the source length is 0
+        if source_length == 0:
+            source_start += 1
+
+        i = source_start - 1
+        j = i + source_length
+        self._lines[i:j] = [line.value for line in hunk]
+
+        offset = hunk.target_length - hunk.source_length
+        for i in range(idx + 1, len(self._hunks)):
+            self._offsets[i] += offset
+
+        self._applied[idx] = True
+
+    def write(self, filename):
+        f = open(filename, "wb")
+        f.writelines(self._lines)
+        f.close()
+
+
 class GitBlack:
     def __init__(self):
         self.repo = Repo(search_parent_directories=True)
@@ -78,6 +117,9 @@ class GitBlack:
         the fact that source lines 4 and 5 never appear in the result means
         those lines were deleted.
         """
+
+        # this is harder than I thought; I'll start with a super naive
+        # approach and improve it later (or never)
 
         result = []
         # if hunk.source_length == 0:
@@ -127,10 +169,12 @@ class GitBlack:
 
             mf = patch_set.modified_files[0]
 
-            a_lines = open(a).readlines()
-            b_lines = open(b).readlines()
-            a_start = 0
-            b_start = 0
+            working_file = HunkList(filename, list(mf))
+
+            # a_lines = open(a).readlines()
+            # b_lines = open(b).readlines()
+            # a_start = 0
+            # b_start = 0
             original_commits = {}
             for hunk in sorted(mf, key=lambda hunk: hunk.source_start):
                 origin = self.compute_origin(hunk)
@@ -142,13 +186,13 @@ class GitBlack:
                             filename, origin_line
                         )
 
-            for l in range(1, len(b_lines) + 1):
-                if l in original_commits:
-                    print(l, original_commits[l])
-                else:
-                    print(l, self.blame(filename, l))
+            # for l in range(1, len(b_lines) + 1):
+            #     if l in original_commits:
+            #         print(l, original_commits[l])
+            #     else:
+            #         print(l, self.blame(filename, l))
 
-            return
+            # return
 
             for hunk in sorted(mf, key=lambda hunk: -hunk.source_start):
                 continue
@@ -166,37 +210,6 @@ class GitBlack:
                     author=original_commit.author,
                     author_date=format_datetime(original_commit.authored_datetime),
                 )
-
-    def apply(
-        self, a: str, b: str, source_start: int, source_length: int, target_lines: list
-    ):
-        """copy `a` to `b`, but apply the (source_start, source_length, lines) patch"""
-        with open(a, "rb") as f:
-            source_lines = f.readlines()
-
-        # I don't understand why, but unified diff needs
-        # this when the source length is 0
-        if source_length == 0:
-            source_start += 1
-
-        with open(b, "wb") as f:
-            f.writelines(source_lines[0 : source_start - 1])
-            f.writelines(target_lines)
-            f.writelines(source_lines[source_start + source_length - 1 :])
-
-
-def git_blame(filename):
-    p = Popen(["git", "blame", "-p", filename], stdout=PIPE)
-    blame = {}
-    for porcelain_line in p.stdout:
-        m = commit_re.match(porcelain_line)
-        if m:
-            commit = m.group("commit").decode()
-            lineno = int(m.group("lineno"))
-        if porcelain_line.startswith(b"\t"):
-            line = porcelain_line[1:]
-            blame.setdefault(commit, []).append((lineno, line))
-    return blame
 
 
 @click.command()
