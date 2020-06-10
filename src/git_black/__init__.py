@@ -45,10 +45,18 @@ class Delta:
     src_lines: List[str]
     dst_start: int
     dst_lines: List[str]
-    offset: int = field(init=False)
 
-    def __post_init__(self):
-        self.offset = len(self.dst_lines) - len(self.src_lines)
+    @property
+    def offset(self):
+        return len(self.dst_lines) - len(self.src_lines)
+
+    @property
+    def src_length(self):
+        return len(self.src_lines)
+
+    @property
+    def dst_length(self):
+        return len(self.dst_lines)
 
     @staticmethod
     def from_hunk(hunk: Hunk, encoding: str):
@@ -66,6 +74,10 @@ class WorkingFile:
         self._deltas = deltas
         self._offsets = [0] * len(deltas)
         self._applied = {}
+
+    @property
+    def deltas(self):
+        return self._deltas
 
     def apply(self, idx):
         if idx in self._applied:
@@ -121,10 +133,10 @@ class GitBlack:
         idx = bisect(self._blame_starts[filename], lineno) - 1
         return self._blame_commits[filename][idx]
 
-    def compute_origin(self, hunk: Hunk):
+    def compute_origin(self, delta: Delta):
         """
-        compute which line or lines from the hunk source end up
-        in each line of the hunk target
+        compute which line or lines from the source end up
+        in each line of the target
 
         returns a list of tuples to be interpreted like this:
 
@@ -144,32 +156,33 @@ class GitBlack:
 
         result = []
 
-        if hunk.source_length < hunk.target_length:
-            for i in range(hunk.source_length):
+        if delta.src_length < delta.dst_length:
+            for i in range(delta.src_length):
                 result.append((i,))
-            for i in range(hunk.target_length - hunk.source_length):
-                result.append((hunk.source_length - 1,))
-        elif hunk.target_length > 0:
-            for i in range(hunk.target_length - 1):
+            for i in range(delta.dst_length - delta.src_length):
+                result.append((delta.src_length - 1,))
+        elif delta.dst_length > 0:
+            for i in range(delta.dst_length - 1):
                 result.append((i,))
-            result.append(tuple(range(hunk.target_length - 1, hunk.source_length)))
+            result.append(tuple(range(delta.dst_length - 1, delta.src_length)))
 
         return result
 
-    def _commit_empty_hunks(self, filename, tmpfile, working_file, hunks):
-        # if a hunk has no target lines, it means stuff was just deleted
+    def _commit_empty_deltas(self, working_file, filename):
+        # if a delta has no target lines, it means stuff was just deleted
         # we'll commit those as ourselves (with no targe lines, there's
         # no entry in the blame anyway)
-        for hunk_idx, hunk in enumerate(hunks):
-            if hunk.target_length > 0:
-                continue
-            working_file.apply(hunk_idx)
-            working_file.write(tmpfile)
-            self.repo.index.add(
-                tmpfile, path_rewriter=lambda entry: filename, write=True
-            )
+        with NamedTemporaryFile() as f:
+            for delta_idx, delta in enumerate(working_file.deltas):
+                if not delta.dst_lines:
+                    continue
+                working_file.apply(delta_idx)
+                working_file.write(f.name)
+                self.repo.index.add(
+                    f.name, path_rewriter=lambda entry: filename, write=True
+                )
 
-        self.repo.index.commit("delete-only commit by git-black",)
+            self.repo.index.commit("delete-only commit by git-black",)
 
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
@@ -197,33 +210,49 @@ class GitBlack:
                 return
 
             mf = patch_set.modified_files[0]
-            hunks = list(mf)
+            hunk_deltas = [Delta.from_hunk(hunk, "latin1") for hunk in mf]
 
-            working_file = WorkingFile(
-                filename, [Delta.from_hunk(h, "latin1") for h in hunks]
-            )
+            # let's map each hunk to its source commits
+            # and break down the deltas in smaller chunks
+            # 1 -> 1
+            # 2 -> 2
+            # 3 -> 3, 4, 5
+            # 4
+            # 5
+            # (0, [0])
+            # (1, [1])
+            # (2, [2, 3, 4])
+            deltas = []
+            for hd in enumerate(hunk_deltas):
+                for dst_lineno, src_linenos in enumerate(self.compute_origin(hd)):
+                    sl = len(src_linenos)
+                    ss = max(1, hd.src_start + min(src_linenos))
+                    dl = 1
+                    ds = dst_lineno
+                    deltas.append(
+                        Delta(src_start=ss, src_lines=sl, dst_start=ds, dst_lines=dl)
+                    )
 
-            # lest map each hunk to its source commits
-            hunk_commits = {}
-            for hunk_idx, hunk in enumerate(hunks):
-                for t in self.compute_origin(hunk):
-                    hunk_commits.setdefault(hunk_idx, set())
-                    for l in t:
-                        origin_line = max(1, hunk.source_start + l)
-                        commit = self.blame(filename, origin_line)
-                        hunk_commits[hunk_idx].add(commit.hexsha)
+            working_file = WorkingFile(filename, deltas)
 
-            grouped_hunks = {}
-            for hunk_idx, commits in hunk_commits.items():
+            delta_commits = {}
+            for delta_idx, delta in enumerate(deltas):
+                delta_commits.setdefault(delta_idx, set())
+                for line in range(delta.dst_start, delta.dst_start + delta.dst_length):
+                    commit = self.blame(filename, line)
+                    delta_commits[delta_idx].add(commit.hexsha)
+
+            grouped_deltas = {}
+            for delta_idx, commits in delta_commits.items():
                 t = tuple(sorted(commits))
-                grouped_hunks.setdefault(t, []).append(hunk_idx)
+                grouped_deltas.setdefault(t, []).append(delta_idx)
 
-            self._commit_empty_hunks(filename, a, working_file, hunks)
+            self._commit_empty_deltas(working_file, filename)
 
-            for commit_hashes, hunk_idxs in grouped_hunks.items():
+            for commit_hashes, delta_idxs in grouped_deltas.items():
 
-                for hunk_idx in hunk_idxs:
-                    working_file.apply(hunk_idx)
+                for delta_idx in delta_idxs:
+                    working_file.apply(delta_idx)
 
                 working_file.write(a)
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
