@@ -60,7 +60,9 @@ class HunkList:
 
         i = source_start - 1
         j = i + source_length
-        self._lines[i:j] = [line.value for line in hunk]
+        self._lines[i:j] = [
+            line.value.encode("latin-1") for line in hunk.target_lines()
+        ]
 
         offset = hunk.target_length - hunk.source_length
         for i in range(idx + 1, len(self._hunks)):
@@ -182,29 +184,37 @@ class GitBlack:
                         commit = self.blame(filename, origin_line)
                         hunk_commits[hunk_idx].add(commit.hexsha)
 
+            grouped_hunks = {}
+            for hunk_idx, commits in hunk_commits.items():
+                t = tuple(sorted(commits))
+                grouped_hunks.setdefault(t, []).append(hunk_idx)
+
             from pprint import pprint
 
-            pprint(hunk_commits)
-
+            #            pprint(grouped_hunks)
             # for l in range(1, len(b_lines) + 1):
             #     if l in original_commits:
             #         print(l, original_commits[l])
             #     else:
             #         print(l, self.blame(filename, l))
 
-            return
+            #           return
 
-            for hunk in sorted(mf, key=lambda hunk: -hunk.source_start):
-                continue
-                target_lines = [
-                    line.value.encode("latin-1") for line in hunk.target_lines()
-                ]
-                self.apply(a, b, hunk.source_start, hunk.source_length, target_lines)
-                os.rename(b, a)
+            for commits, hunk_idxs in grouped_hunks.items():
+                # continue
+                # target_lines = [
+                #    line.value.encode("latin-1") for line in hunk.target_lines()
+                # ]
+                # self.apply(a, b, hunk.source_start, hunk.source_length, target_lines)
+                # os.rename(b, a)
 
-                original_commit = self.blame(filename, hunk.source_start)
+                for hunk_idx in hunk_idxs:
+                    working_file.apply(hunk_idx)
 
+                working_file.write(a)
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
+
+                original_commit = self.repo.commit(commits[0])
                 self.repo.index.commit(
                     original_commit.message,
                     author=original_commit.author,
