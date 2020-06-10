@@ -4,7 +4,7 @@ import shutil
 import sys
 import time
 from bisect import bisect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
 from email.utils import format_datetime
@@ -45,13 +45,13 @@ class Delta:
     src_lines: List[str]
     dst_start: int
     dst_lines: List[str]
-    offset: int
+    offset: int = field(init=False)
 
     def __post_init__(self):
         self.offset = len(self.dst_lines) - len(self.src_lines)
 
     @staticmethod
-    def from_hunk(self, hunk: Hunk, encoding: str):
+    def from_hunk(hunk: Hunk, encoding: str):
         return Delta(
             src_start=hunk.source_start,
             src_lines=[line.value.encode(encoding) for line in hunk.source_lines()],
@@ -66,9 +66,6 @@ class WorkingFile:
         self._deltas = deltas
         self._offsets = [0] * len(deltas)
         self._applied = {}
-
-    # def hunk(self, idx) -> Hunk:
-    #     return self._hunks[idx]
 
     def apply(self, idx):
         if idx in self._applied:
@@ -146,8 +143,6 @@ class GitBlack:
         # approach and improve it later (or never)
 
         result = []
-        # if hunk.source_length == 0:
-        #     result = [(-1,)] * hunk.target_length
 
         if hunk.source_length < hunk.target_length:
             for i in range(hunk.source_length):
@@ -208,11 +203,6 @@ class GitBlack:
                 filename, [Delta.from_hunk(h, "latin1") for h in hunks]
             )
 
-            # a_lines = open(a).readlines()
-            # b_lines = open(b).readlines()
-            # a_start = 0
-            # b_start = 0
-
             # lest map each hunk to its source commits
             hunk_commits = {}
             for hunk_idx, hunk in enumerate(hunks):
@@ -228,22 +218,9 @@ class GitBlack:
                 t = tuple(sorted(commits))
                 grouped_hunks.setdefault(t, []).append(hunk_idx)
 
-            # for l in range(1, len(b_lines) + 1):
-            #     if l in original_commits:
-            #         print(l, original_commits[l])
-            #     else:
-            #         print(l, self.blame(filename, l))
-
-            #           return
             self._commit_empty_hunks(filename, a, working_file, hunks)
 
             for commit_hashes, hunk_idxs in grouped_hunks.items():
-                # continue
-                # target_lines = [
-                #    line.value.encode("latin-1") for line in hunk.target_lines()
-                # ]
-                # self.apply(a, b, hunk.source_start, hunk.source_length, target_lines)
-                # os.rename(b, a)
 
                 for hunk_idx in hunk_idxs:
                     working_file.apply(hunk_idx)
@@ -274,11 +251,15 @@ class GitBlack:
             working_file.write(filename)
 
 
+def git_black(filename):
+    gb = GitBlack()
+    gb.commit_filename(filename)
+
+
 @click.command()
 @click.argument("filename")
 def cli(filename):
-    gb = GitBlack()
-    gb.commit_filename(filename)
+    git_black(filename)
 
 
 if __name__ == "__main__":
