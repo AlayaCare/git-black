@@ -214,12 +214,24 @@ class GitBlack:
                 working_file.write(a)
                 self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
 
-                original_commit = self.repo.commit(commits[0])
+                main_commit = self.repo.commit(commits[0])
+                commit_message = main_commit.message
+                if len(commits) > 1:
+                    main_commit = self.most_recent_commit(commits)
+                    commit_message += "\n".join(
+                        ["(automatic commit by git-black)", "(original commits:)",]
+                        + ["(  {})" for c in commits]
+                    )
+
                 self.repo.index.commit(
-                    original_commit.message,
-                    author=original_commit.author,
-                    author_date=format_datetime(original_commit.authored_datetime),
+                    commit_message,
+                    author=main_commit.author,
+                    author_date=format_datetime(main_commit.authored_datetime),
                 )
+
+    def most_recent_commit(self, hashes):
+        commits = [self.repo.commit(h) for h in hashes]
+        return sorted(commits, key=lambda c: c.authored_datetime)[-1]
 
 
 @click.command()
