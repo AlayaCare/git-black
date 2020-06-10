@@ -4,6 +4,7 @@ import shutil
 import sys
 import time
 from bisect import bisect
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from email.utils import format_datetime
@@ -11,6 +12,7 @@ from importlib.resources import read_text
 from io import StringIO
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
+from typing import List
 
 import click
 from git import Commit, Repo
@@ -35,11 +37,34 @@ def reformat(a):
     run(["black", "-l89", a])
 
 
-class HunkList:
-    def __init__(self, source_file: str, hunks):
+@dataclass
+class Delta:
+    """this is a simplified version of unidiff.Hunk"""
+
+    src_start: int
+    src_lines: List[str]
+    dst_start: int
+    dst_lines: List[str]
+    offset: int
+
+    def __post_init__(self):
+        self.offset = len(self.dst_lines) - len(self.src_lines)
+
+    @staticmethod
+    def from_hunk(self, hunk: Hunk, encoding: str):
+        return Delta(
+            src_start=hunk.source_start,
+            src_lines=[line.value.encode(encoding) for line in hunk.source_lines()],
+            dst_start=hunk.target_start,
+            dst_lines=[line.value.encode(encoding) for line in hunk.target_lines()],
+        )
+
+
+class WorkingFile:
+    def __init__(self, source_file: str, deltas: List[Delta]):
         self._lines = open(source_file, "rb").readlines()
-        self._hunks = hunks
-        self._offsets = [0] * len(hunks)
+        self._deltas = deltas
+        self._offsets = [0] * len(deltas)
         self._applied = {}
 
     # def hunk(self, idx) -> Hunk:
@@ -48,25 +73,22 @@ class HunkList:
     def apply(self, idx):
         if idx in self._applied:
             return
-        hunk = self._hunks[idx]
+        delta = self._deltas[idx]
 
-        source_length = hunk.source_length
-        source_start = hunk.source_start + self._offsets[idx]
+        src_length = len(delta.src_lines)
+        src_start = delta.src_start + self._offsets[idx]
 
         # I don't understand why, but unified diff needs
         # this when the source length is 0
-        if source_length == 0:
-            source_start += 1
+        if src_length == 0:
+            src_start += 1
 
-        i = source_start - 1
-        j = i + source_length
-        self._lines[i:j] = [
-            line.value.encode("latin-1") for line in hunk.target_lines()
-        ]
+        i = src_start - 1
+        j = i + src_length
+        self._lines[i:j] = delta.dst_lines
 
-        offset = hunk.target_length - hunk.source_length
-        for i in range(idx + 1, len(self._hunks)):
-            self._offsets[i] += offset
+        for i in range(idx + 1, len(self._deltas)):
+            self._offsets[i] += delta.offset
 
         self._applied[idx] = True
 
@@ -182,7 +204,9 @@ class GitBlack:
             mf = patch_set.modified_files[0]
             hunks = list(mf)
 
-            working_file = HunkList(filename, hunks)
+            working_file = WorkingFile(
+                filename, [Delta.from_hunk(h, "latin1") for h in hunks]
+            )
 
             # a_lines = open(a).readlines()
             # b_lines = open(b).readlines()
