@@ -1,28 +1,17 @@
 import os
-import re
 import shutil
-import sys
-import time
 from bisect import bisect
-from dataclasses import dataclass, field
-from datetime import datetime
-from difflib import SequenceMatcher
+from dataclasses import dataclass
 from email.utils import format_datetime
 from importlib.resources import read_text
-from io import StringIO
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import List
 
 import click
 from git import Commit, Repo
-from git.diff import Diff
-from git.util import Actor
 from jinja2 import Environment, FunctionLoader
 from unidiff import Hunk, PatchSet
-from unidiff.patch import Line
-
-commit_re = re.compile(rb"(?P<commit>[0-9a-f]{40})\s+\d+\s+(?P<lineno>\d+)")
 
 
 def load_template(template):
@@ -133,7 +122,8 @@ class GitBlack:
         idx = bisect(self._blame_starts[filename], lineno) - 1
         return self._blame_commits[filename][idx]
 
-    def compute_origin(self, delta: Delta):
+    @staticmethod
+    def compute_origin(delta: Delta):
         """
         compute which line or lines from the source end up
         in each line of the target
@@ -156,23 +146,38 @@ class GitBlack:
 
         result = []
 
-        if delta.src_length < delta.dst_length:
-            for i in range(delta.src_length):
-                result.append((i,))
-            for i in range(delta.dst_length - delta.src_length):
-                result.append((delta.src_length - 1,))
-        elif delta.dst_length > 0:
-            for i in range(delta.dst_length - 1):
-                result.append((i,))
-            result.append(tuple(range(delta.dst_length - 1, delta.src_length)))
+        if delta.src_length == 0:
+            return [tuple()] * delta.dst_length
 
-        return result
+        if delta.dst_length == 0:
+            return []
+
+        for i in range(min(delta.src_length, delta.dst_length)):
+            result.append([i])
+
+        for i in range(delta.dst_length, delta.src_length):
+            result[-1].append(i)
+
+        for i in range(delta.src_length, delta.dst_length):
+            result.append([delta.src_length - 1])
+
+        # if delta.src_length < delta.dst_length:
+        #    for i in range(delta.src_length):
+        #        result.append((i,))
+        #    for i in range(delta.dst_length - delta.src_length):
+        #        result.append((delta.src_length - 1,))
+        # elif delta.dst_length > 0:
+        #    for i in range(delta.dst_length - 1):
+        #        result.append((i,))
+        #    result.append(tuple(range(delta.dst_length - 1, delta.src_length)))
+
+        return [tuple(t) for t in result]
 
     def _commit_empty_deltas(self, working_file, filename):
         # if a delta has no target lines, it means stuff was just deleted
         # we'll commit those as ourselves (with no targe lines, there's
         # no entry in the blame anyway)
-        with NamedTemporaryFile() as f:
+        with NamedTemporaryFile(dir=".") as f:
             for delta_idx, delta in enumerate(working_file.deltas):
                 if not delta.dst_lines:
                     continue
@@ -212,26 +217,32 @@ class GitBlack:
             mf = patch_set.modified_files[0]
             hunk_deltas = [Delta.from_hunk(hunk, "latin1") for hunk in mf]
 
-            # let's map each hunk to its source commits
-            # and break down the deltas in smaller chunks
-            # 1 -> 1
-            # 2 -> 2
-            # 3 -> 3, 4, 5
-            # 4
-            # 5
-            # (0, [0])
-            # (1, [1])
-            # (2, [2, 3, 4])
+            print("original deltas")
+            for d in hunk_deltas:
+                print(d)
+
+            # let's map each hunk to its source commits and break down the deltas
+            # in smaller chunks; this will let prepare and group commits with
+            # a much smaller granularity
             deltas = []
-            for hd in enumerate(hunk_deltas):
+            for hd in hunk_deltas:
+                if not hd.dst_lines:
+                    deltas.append(hd)
+                    continue
                 for dst_lineno, src_linenos in enumerate(self.compute_origin(hd)):
-                    sl = len(src_linenos)
-                    ss = max(1, hd.src_start + min(src_linenos))
-                    dl = 1
-                    ds = dst_lineno
+                    ss = hd.src_start + min(src_linenos, default=0)
+                    sl = [hd.src_lines[lineno] for lineno in src_linenos]
+                    ds = hd.dst_start + dst_lineno
+                    dl = [hd.dst_lines[dst_lineno]]
                     deltas.append(
                         Delta(src_start=ss, src_lines=sl, dst_start=ds, dst_lines=dl)
                     )
+
+            # print("granular deltas")
+            # for delta in deltas:
+            #     print(delta)
+
+            # return
 
             working_file = WorkingFile(filename, deltas)
 

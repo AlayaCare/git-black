@@ -1,8 +1,9 @@
 import os
 from subprocess import run
-from tempfile import TemporaryDirectory
 
-from git_black import git_black
+import pytest
+
+from git_black import Delta, GitBlack, git_black
 
 black_tests = b"""
 from collections import (
@@ -66,3 +67,17 @@ def test_git_black(tmpdir):
         b"testing git-black\ndelete-only commit by git-black\ntesting git-black"
     )
     assert run(["black", "--check", "blacktests.py"]).returncode == 0
+
+
+@pytest.mark.parametrize(
+    ("src", "dst", "expected"),
+    [
+        ("abc", "abcde", [(0,), (1,), (2,), (2,), (2,)]),
+        ("abcde", "abc", [(0,), (1,), (2, 3, 4)]),
+        ("", "abc", [(), (), ()]),
+        ("abc", "", []),
+    ],
+)
+def test_delta_origins(src, dst, expected):
+    delta = Delta(src_start=0, src_lines=src, dst_start=0, dst_lines=dst)
+    assert GitBlack.compute_origin(delta) == expected
