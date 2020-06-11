@@ -179,7 +179,7 @@ class GitBlack:
         # no entry in the blame anyway)
         with NamedTemporaryFile(dir=".") as f:
             for delta_idx, delta in enumerate(working_file.deltas):
-                if not delta.dst_lines:
+                if delta.dst_lines:
                     continue
                 working_file.apply(delta_idx)
                 working_file.write(f.name)
