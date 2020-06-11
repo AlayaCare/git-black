@@ -10,6 +10,7 @@ from typing import List
 
 import click
 from git import Commit, Repo
+from git.objects.util import altz_to_utctz_str
 from jinja2 import Environment, FunctionLoader
 from unidiff import Hunk, PatchSet
 
@@ -56,6 +57,16 @@ class Delta:
             dst_lines=[line.value.encode(encoding) for line in hunk.target_lines()],
         )
 
+    def __str__(self):
+        s = f"Delta(\n    src_start={self.src_start},\n    src_lines=[\n"
+        for line in self.src_lines:
+            s += "        {!r},\n".format(line)
+        s += f"    ],\n    dst_start={self.dst_start},\n    dst_lines=[\n"
+        for line in self.dst_lines:
+            s += "        {!r},\n".format(line)
+        s += "    ]\n)\n"
+        return s
+
 
 class WorkingFile:
     def __init__(self, original_lines: str, deltas: List[Delta]):
@@ -72,6 +83,9 @@ class WorkingFile:
         if idx in self._applied:
             return
         delta = self._deltas[idx]
+
+        # if "MultiTenantOrm.__name__" in "".join(delta.src_lines):
+        #    breakpoint()
 
         src_length = len(delta.src_lines)
         src_start = delta.src_start + self._offsets[idx]
@@ -144,22 +158,37 @@ class GitBlack:
         # this is harder than I thought; I'll start with a super naive
         # approach and improve it later (or never)
 
-        result = []
-
         if delta.src_length == 0:
-            return [tuple()] * delta.dst_length
-
+            return {(): tuple(range(delta.dst_length))}
         if delta.dst_length == 0:
-            return []
+            return {tuple(range(delta.src_length)): ()}
 
-        for i in range(min(delta.src_length, delta.dst_length)):
-            result.append([i])
+        result = {}
 
-        for i in range(delta.dst_length, delta.src_length):
-            result[-1].append(i)
+        for i in range(min(delta.src_length, delta.dst_length) - 1):
+            result[(i,)] = (i,)
 
-        for i in range(delta.src_length, delta.dst_length):
-            result.append([delta.src_length - 1])
+        if delta.src_length >= delta.dst_length:
+            # 0  0     {[0]: 0, [1]: 1, (2,3,4): 2}
+            # 1  1
+            # 2  2
+            # 3
+            # 4
+            result[tuple(range(delta.dst_length - 1, delta.src_length))] = (
+                delta.dst_length - 1,
+            )
+        else:
+            # 0 0  {(0,): (0,), (1,): (1,), (2,): (2,3,4)}
+            # 1 1
+            # 2 2
+            #   3
+            #   4
+            result[(delta.src_length - 1,)] = tuple(
+                range(delta.src_length - 1, delta.dst_length)
+            )
+
+        # for i in range(delta.src_length, delta.dst_length):
+        #    result.append([delta.src_length - 1])
 
         # if delta.src_length < delta.dst_length:
         #    for i in range(delta.src_length):
@@ -171,23 +200,26 @@ class GitBlack:
         #        result.append((i,))
         #    result.append(tuple(range(delta.dst_length - 1, delta.src_length)))
 
-        return [tuple(t) for t in result]
+        return result
 
     def _commit_empty_deltas(self, working_file, filename):
         # if a delta has no target lines, it means stuff was just deleted
         # we'll commit those as ourselves (with no targe lines, there's
         # no entry in the blame anyway)
         with NamedTemporaryFile(dir=".") as f:
+            found_empty_deltas = False
             for delta_idx, delta in enumerate(working_file.deltas):
                 if delta.dst_lines:
                     continue
+                found_empty_deltas = True
                 working_file.apply(delta_idx)
                 working_file.write(f.name)
                 self.repo.index.add(
                     f.name, path_rewriter=lambda entry: filename, write=True
                 )
 
-            self.repo.index.commit("delete-only commit by git-black",)
+            if found_empty_deltas:
+                self.repo.index.commit("delete-only commit by git-black",)
 
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
@@ -197,7 +229,7 @@ class GitBlack:
             # shutil.copy(filename, a)
             # shutil.copy(filename, b)
 
-            reformat(filename)
+            # reformat(filename)
 
             # why latin-1 ?
             # The PatchSet object demands an encoding, even when I think
@@ -220,6 +252,12 @@ class GitBlack:
             mf = patch_set.modified_files[0]
             hunk_deltas = [Delta.from_hunk(hunk, "latin1") for hunk in mf]
 
+            print()
+            print("==== original deltas ====")
+            for delta in hunk_deltas:
+                print(delta)
+                print("origins: {!r}".format(self.compute_origin(delta)))
+
             # let's map each hunk to its source commits and break down the deltas
             # in smaller chunks; this will let prepare and group commits with
             # a much smaller granularity
@@ -228,26 +266,44 @@ class GitBlack:
                 if not hd.dst_lines:
                     deltas.append(hd)
                     continue
-                for dst_lineno, src_linenos in enumerate(self.compute_origin(hd)):
+
+                for src_linenos, dst_linenos in self.compute_origin(hd).items():
                     ss = hd.src_start + min(src_linenos, default=0)
                     sl = [hd.src_lines[lineno] for lineno in src_linenos]
-                    ds = hd.dst_start + dst_lineno
-                    dl = [hd.dst_lines[dst_lineno]]
+                    ds = hd.dst_start + min(src_linenos)
+                    dl = [hd.dst_lines[lineno] for lineno in dst_linenos]
+                    print(f"{ss=} {sl=} {ds=} {dl=}")
                     deltas.append(
                         Delta(src_start=ss, src_lines=sl, dst_start=ds, dst_lines=dl)
                     )
+                # origin = self.compute_origin(hd)
 
-            # print("granular deltas")
-            # for delta in deltas:
-            #     print(delta)
+                # for idx in range(min(hd.src_length, hd.dst_length)):
+                #     deltas.append(
+                #         Delta(
+                #             src_start = hd.src_start + idx,
+                #             src_lines = hd.src_lines[idx],
+                #             dst_start = hd.dst_start + idx,
+                #             dst_lines = hd.dst_lines[idx],
+                #         )
+                #     )
 
-            # return
+                # if hd.dst_length > hd.src_length:
+
+                # for dst_lineno, src_linenos in enumerate():
+                #     ds = hd.dst_start + dst_lineno
+                #     dl = [hd.dst_lines[dst_lineno]]
+
+            print()
+            print("==== granular deltas ====")
+            for delta in deltas:
+                print(delta)
 
             working_file = WorkingFile(original_lines, deltas)
 
             delta_commits = {}
             for delta_idx, delta in enumerate(deltas):
-                for line in range(delta.dst_start, delta.dst_start + delta.dst_length):
+                for line in range(delta.src_start, delta.src_start + delta.src_length):
                     commit = self.blame(filename, line)
                     delta_commits.setdefault(delta_idx, set()).add(commit.hexsha)
 
@@ -255,6 +311,11 @@ class GitBlack:
             for delta_idx, commits in delta_commits.items():
                 t = tuple(sorted(commits))
                 grouped_deltas.setdefault(t, []).append(delta_idx)
+
+            print("==== grouped deltas ====")
+            from pprint import pprint
+
+            print(grouped_deltas)
 
             self._commit_empty_deltas(working_file, filename)
 
@@ -282,10 +343,12 @@ class GitBlack:
                 )
                 commit_message += "\n".join(["  {}".format(c.hexsha) for c in commits])
 
+                date_ts = main_commit.authored_date
+                date_tz = altz_to_utctz_str(main_commit.author_tz_offset)
                 self.repo.index.commit(
                     commit_message,
                     author=main_commit.author,
-                    author_date=format_datetime(main_commit.authored_datetime),
+                    author_date="{} {}".format(date_ts, date_tz),
                 )
 
             working_file.write(filename)
