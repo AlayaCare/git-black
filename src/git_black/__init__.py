@@ -210,9 +210,9 @@ class GitBlack:
                 Popen(["git", "diff", "-U0", filename], stdout=PIPE,).stdout,
                 encoding="latin-1",
             )
-            original_lines = run(
-                ["git", "show", "HEAD:" + filename], capture_output=True
-            ).stdout
+            original_lines = Popen(
+                ["git", "show", "HEAD:" + filename], stdout=PIPE
+            ).stdout.readlines()
 
             if not patch_set.modified_files:
                 return
