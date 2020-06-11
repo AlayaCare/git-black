@@ -1,8 +1,6 @@
 import os
-import shutil
 from bisect import bisect
 from dataclasses import dataclass
-from email.utils import format_datetime
 from importlib.resources import read_text
 from subprocess import PIPE, Popen, run
 from tempfile import NamedTemporaryFile, TemporaryDirectory
@@ -83,9 +81,6 @@ class WorkingFile:
         if idx in self._applied:
             return
         delta = self._deltas[idx]
-
-        # if "MultiTenantOrm.__name__" in "".join(delta.src_lines):
-        #    breakpoint()
 
         src_length = len(delta.src_lines)
         src_start = delta.src_start + self._offsets[idx]
@@ -169,36 +164,13 @@ class GitBlack:
             result[(i,)] = (i,)
 
         if delta.src_length >= delta.dst_length:
-            # 0  0     {[0]: 0, [1]: 1, (2,3,4): 2}
-            # 1  1
-            # 2  2
-            # 3
-            # 4
             result[tuple(range(delta.dst_length - 1, delta.src_length))] = (
                 delta.dst_length - 1,
             )
         else:
-            # 0 0  {(0,): (0,), (1,): (1,), (2,): (2,3,4)}
-            # 1 1
-            # 2 2
-            #   3
-            #   4
             result[(delta.src_length - 1,)] = tuple(
                 range(delta.src_length - 1, delta.dst_length)
             )
-
-        # for i in range(delta.src_length, delta.dst_length):
-        #    result.append([delta.src_length - 1])
-
-        # if delta.src_length < delta.dst_length:
-        #    for i in range(delta.src_length):
-        #        result.append((i,))
-        #    for i in range(delta.dst_length - delta.src_length):
-        #        result.append((delta.src_length - 1,))
-        # elif delta.dst_length > 0:
-        #    for i in range(delta.dst_length - 1):
-        #        result.append((i,))
-        #    result.append(tuple(range(delta.dst_length - 1, delta.src_length)))
 
         return result
 
@@ -223,13 +195,9 @@ class GitBlack:
 
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
-            tmpf = os.path.join(tmpdir, "filename")
-            # b = os.path.join(tmpdir, "b")
+            tmpf = os.path.join(tmpdir, "b.py")
 
-            # shutil.copy(filename, a)
-            # shutil.copy(filename, b)
-
-            # reformat(filename)
+            reformat(filename)
 
             # why latin-1 ?
             # The PatchSet object demands an encoding, even when I think
@@ -252,12 +220,6 @@ class GitBlack:
             mf = patch_set.modified_files[0]
             hunk_deltas = [Delta.from_hunk(hunk, "latin1") for hunk in mf]
 
-            print()
-            print("==== original deltas ====")
-            for delta in hunk_deltas:
-                print(delta)
-                print("origins: {!r}".format(self.compute_origin(delta)))
-
             # let's map each hunk to its source commits and break down the deltas
             # in smaller chunks; this will let prepare and group commits with
             # a much smaller granularity
@@ -272,32 +234,9 @@ class GitBlack:
                     sl = [hd.src_lines[lineno] for lineno in src_linenos]
                     ds = hd.dst_start + min(src_linenos)
                     dl = [hd.dst_lines[lineno] for lineno in dst_linenos]
-                    print(f"{ss=} {sl=} {ds=} {dl=}")
                     deltas.append(
                         Delta(src_start=ss, src_lines=sl, dst_start=ds, dst_lines=dl)
                     )
-                # origin = self.compute_origin(hd)
-
-                # for idx in range(min(hd.src_length, hd.dst_length)):
-                #     deltas.append(
-                #         Delta(
-                #             src_start = hd.src_start + idx,
-                #             src_lines = hd.src_lines[idx],
-                #             dst_start = hd.dst_start + idx,
-                #             dst_lines = hd.dst_lines[idx],
-                #         )
-                #     )
-
-                # if hd.dst_length > hd.src_length:
-
-                # for dst_lineno, src_linenos in enumerate():
-                #     ds = hd.dst_start + dst_lineno
-                #     dl = [hd.dst_lines[dst_lineno]]
-
-            print()
-            print("==== granular deltas ====")
-            for delta in deltas:
-                print(delta)
 
             working_file = WorkingFile(original_lines, deltas)
 
@@ -311,11 +250,6 @@ class GitBlack:
             for delta_idx, commits in delta_commits.items():
                 t = tuple(sorted(commits))
                 grouped_deltas.setdefault(t, []).append(delta_idx)
-
-            print("==== grouped deltas ====")
-            from pprint import pprint
-
-            print(grouped_deltas)
 
             self._commit_empty_deltas(working_file, filename)
 
