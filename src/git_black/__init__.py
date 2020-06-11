@@ -58,8 +58,8 @@ class Delta:
 
 
 class WorkingFile:
-    def __init__(self, source_file: str, deltas: List[Delta]):
-        self._lines = open(source_file, "rb").readlines()
+    def __init__(self, original_lines: str, deltas: List[Delta]):
+        self._lines = original_lines
         self._deltas = deltas
         self._offsets = [0] * len(deltas)
         self._applied = {}
@@ -106,7 +106,7 @@ class GitBlack:
         self.color_idx = 0
 
     def blame(self, filename, lineno) -> Commit:
-        if not filename in self._blame_starts:
+        if filename not in self._blame_starts:
             _blame = sorted(
                 [
                     (e.linenos.start, e.commit)
@@ -191,13 +191,13 @@ class GitBlack:
 
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
-            a = os.path.join(tmpdir, "a")
-            b = os.path.join(tmpdir, "b")
+            tmpf = os.path.join(tmpdir, "filename")
+            # b = os.path.join(tmpdir, "b")
 
-            shutil.copy(filename, a)
-            shutil.copy(filename, b)
+            # shutil.copy(filename, a)
+            # shutil.copy(filename, b)
 
-            reformat(b)
+            reformat(filename)
 
             # why latin-1 ?
             # The PatchSet object demands an encoding, even when I think
@@ -207,19 +207,18 @@ class GitBlack:
             # Even if the input is UTF-8 or anything else, this should work.
 
             patch_set = PatchSet(
-                Popen(["git", "diff", "-U0", "--no-index", a, b], stdout=PIPE,).stdout,
+                Popen(["git", "diff", "-U0", filename], stdout=PIPE,).stdout,
                 encoding="latin-1",
             )
+            original_lines = run(
+                ["git", "show", "HEAD:" + filename], capture_output=True
+            ).stdout
 
             if not patch_set.modified_files:
                 return
 
             mf = patch_set.modified_files[0]
             hunk_deltas = [Delta.from_hunk(hunk, "latin1") for hunk in mf]
-
-            print("original deltas")
-            for d in hunk_deltas:
-                print(d)
 
             # let's map each hunk to its source commits and break down the deltas
             # in smaller chunks; this will let prepare and group commits with
@@ -244,7 +243,7 @@ class GitBlack:
 
             # return
 
-            working_file = WorkingFile(filename, deltas)
+            working_file = WorkingFile(original_lines, deltas)
 
             delta_commits = {}
             for delta_idx, delta in enumerate(deltas):
@@ -264,8 +263,10 @@ class GitBlack:
                 for delta_idx in delta_idxs:
                     working_file.apply(delta_idx)
 
-                working_file.write(a)
-                self.repo.index.add(a, path_rewriter=lambda entry: filename, write=True)
+                working_file.write(tmpf)
+                self.repo.index.add(
+                    tmpf, path_rewriter=lambda entry: filename, write=True
+                )
 
                 commits = [self.repo.commit(h) for h in commit_hashes]
 
