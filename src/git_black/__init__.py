@@ -248,10 +248,9 @@ class GitBlack:
 
             delta_commits = {}
             for delta_idx, delta in enumerate(deltas):
-                delta_commits.setdefault(delta_idx, set())
                 for line in range(delta.dst_start, delta.dst_start + delta.dst_length):
                     commit = self.blame(filename, line)
-                    delta_commits[delta_idx].add(commit.hexsha)
+                    delta_commits.setdefault(delta_idx, set()).add(commit.hexsha)
 
             grouped_deltas = {}
             for delta_idx, commits in delta_commits.items():
