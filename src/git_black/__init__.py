@@ -232,7 +232,7 @@ class GitBlack:
                 for src_linenos, dst_linenos in self.compute_origin(hd).items():
                     ss = hd.src_start + min(src_linenos, default=0)
                     sl = [hd.src_lines[lineno] for lineno in src_linenos]
-                    ds = hd.dst_start + min(src_linenos)
+                    ds = hd.dst_start + min(dst_linenos)
                     dl = [hd.dst_lines[lineno] for lineno in dst_linenos]
                     deltas.append(
                         Delta(src_start=ss, src_lines=sl, dst_start=ds, dst_lines=dl)
