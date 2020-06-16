@@ -172,25 +172,6 @@ class GitBlack:
 
         return result
 
-    def _commit_empty_deltas(self, working_file, filename):
-        # if a delta has no target lines, it means stuff was just deleted
-        # we'll commit those as ourselves (with no targe lines, there's
-        # no entry in the blame anyway)
-        with NamedTemporaryFile(dir=".") as f:
-            found_empty_deltas = False
-            for delta_idx, delta in enumerate(working_file.deltas):
-                if delta.dst_lines:
-                    continue
-                found_empty_deltas = True
-                working_file.apply(delta_idx)
-                working_file.write(f.name)
-                self.repo.index.add(
-                    f.name, path_rewriter=lambda entry: filename, write=True
-                )
-
-            if found_empty_deltas:
-                self.repo.index.commit("delete-only commit by git-black",)
-
     def commit_filename(self, filename):
         with TemporaryDirectory(dir=".") as tmpdir:
             tmpf = os.path.join(tmpdir, "b.py")
@@ -251,8 +232,6 @@ class GitBlack:
             for delta_idx, commits in delta_commits.items():
                 t = tuple(sorted(commits))
                 grouped_deltas.setdefault(t, []).append(delta_idx)
-
-            self._commit_empty_deltas(working_file, filename)
 
             for commit_hashes, delta_idxs in grouped_deltas.items():
 
