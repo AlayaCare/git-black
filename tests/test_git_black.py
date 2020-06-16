@@ -62,7 +62,7 @@ def test_git_black(tmpdir):
 
     git_black("blacktests.py")
 
-    log = run(["git", "log", "--format=format:%s"], capture_output=True).stdout
+    log = run(["git", "log", r"--format=format:%s"], capture_output=True).stdout
     assert log == (
         b"testing git-black\ndelete-only commit by git-black\ntesting git-black"
     )
