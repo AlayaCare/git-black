@@ -265,8 +265,6 @@ class GitBlack:
                     author_date="{} {}".format(date_ts, date_tz),
                 )
 
-            working_file.write(filename)
-
 
 def git_black(filename):
     gb = GitBlack()
