@@ -62,7 +62,7 @@ class Delta:
         s += f"    ],\n    dst_start={self.dst_start},\n    dst_lines=[\n"
         for line in self.dst_lines:
             s += "        {!r},\n".format(line)
-        s += "    ]\n)\n"
+        s += "    ]\n)"
         return s
 
 
@@ -134,20 +134,18 @@ class GitBlack:
     @staticmethod
     def compute_origin(delta: Delta):
         """
-        compute which line or lines from the source end up
-        in each line of the target
+        return a dict that maps tuples of source lines
+        to tuples of destination lines. Each key/value pair
+        in the dict represents a set of source lines (the key tuple)
+        that became the destination lines (the value tuple).
 
-        returns a list of tuples to be interpreted like this:
+        although weird, the numbers in the tuples are 0-indexed.
 
-        [
-            (1,),       # target line 1 comes from source line 1
-            (2,3)       # target line 2 comes from source lines 2 and 3
-            (),         # target line 3 doesn't come from the source (an inserted line)
-            (6,),       # target line 4 comes from line 6
-        ]
-
-        the fact that source lines 4 and 5 never appear in the result means
-        those lines were deleted.
+        e.g.
+        {   # src: dst
+            (0,1): (0)     # the first 2 lines collapsed into the first line of the output
+            (2,): (1,2,3)  # the third line expanded into lines 2 3 and 4
+        }
         """
 
         # this is harder than I thought; I'll start with a super naive
