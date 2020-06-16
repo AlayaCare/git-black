@@ -204,10 +204,6 @@ class GitBlack:
             # commits with a much smaller granularity
             deltas = []
             for hd in hunk_deltas:
-                # if not hd.dst_lines:
-                #     deltas.append(hd)
-                #     continue
-
                 for src_linenos, dst_linenos in self.compute_origin(hd).items():
                     ss = hd.src_start + min(src_linenos, default=0)
                     sl = [hd.src_lines[lineno] for lineno in src_linenos]
