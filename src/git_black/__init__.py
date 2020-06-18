@@ -268,7 +268,7 @@ class GitBlack:
                 commits = tuple(sorted(delta_blame.commits))
                 grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
 
-        sys.stdout.write("done.")
+        sys.stdout.write("done.\n")
         total = len(grouped_deltas)
         progress = 0
         for commits, deltas in grouped_deltas.items():
