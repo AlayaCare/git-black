@@ -301,14 +301,14 @@ class GitBlack:
             for d in dirs:
                 os.makedirs(os.path.join(tmpdir, d), exist_ok=True)
 
+            filenames = set()
             for delta in deltas:
-                filename = delta.filename
-                patcher = self.patchers[filename]
+                self.patchers[delta.filename].apply(delta)
+                filenames.add(delta.filename)
+
+            for filename in filenames:
                 tmpf = os.path.join(tmpdir, filename)
-
-                patcher.apply(delta)
-                patcher.write(tmpf)
-
+                self.patchers[filename].write(tmpf)
                 self.repo.index.add(tmpf, path_rewriter=lambda entry: filename)
 
             commits = [self.repo.commit(h) for h in original_commits]
