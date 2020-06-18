@@ -291,10 +291,14 @@ class GitBlack:
         self.patchers = {}
 
     def commit_changes(self):
-        print("Reading changes...")
+        sys.stdout.write("Reading changes... ")
+        sys.stdout.flush()
         grouped_deltas = {}
+        submodules = set(s.path for s in self.repo.submodules)
         for diff in self.repo.index.diff(None):
             if diff.change_type != "M":
+                continue
+            if diff.a_path in submodules:
                 continue
             filename = diff.a_path
             self.patchers[filename] = Patcher(self.repo, filename)
@@ -303,6 +307,7 @@ class GitBlack:
                 commits = tuple(sorted(delta_blame.commits))
                 grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
 
+        sys.stdout.write("done.")
         total = len(grouped_deltas)
         progress = 0
         for commits, deltas in grouped_deltas.items():
