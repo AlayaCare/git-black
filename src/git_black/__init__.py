@@ -5,14 +5,14 @@ from collections import namedtuple
 from dataclasses import dataclass
 from importlib.resources import read_text
 from subprocess import PIPE, Popen, run
-from tempfile import NamedTemporaryFile, TemporaryDirectory
+from tempfile import TemporaryDirectory
 from typing import List
 
 import click
 from git import Commit, Repo
 from git.objects.util import altz_to_utctz_str
 from jinja2 import Environment, FunctionLoader
-from unidiff import Hunk, PatchedFile, PatchSet
+from unidiff import Hunk, PatchSet
 
 
 def load_template(template):
@@ -241,45 +241,6 @@ class Patcher:
         f.close()
 
 
-class WorkingFile:
-    def __init__(self, original_lines: str, deltas: List[Delta]):
-        self._lines = original_lines
-        self._deltas = deltas
-        self._offsets = [0] * len(deltas)
-        self._applied = {}
-
-    @property
-    def deltas(self):
-        return self._deltas
-
-    def apply(self, idx):
-        if idx in self._applied:
-            return
-        delta = self._deltas[idx]
-
-        src_length = len(delta.src_lines)
-        src_start = delta.src_start + self._offsets[idx]
-
-        # I don't understand why, but unified diff needs
-        # this when the source length is 0
-        if src_length == 0:
-            src_start += 1
-
-        i = src_start - 1
-        j = i + src_length
-        self._lines[i:j] = delta.dst_lines
-
-        for i in range(idx + 1, len(self._deltas)):
-            self._offsets[i] += delta.offset
-
-        self._applied[idx] = True
-
-    def write(self, filename):
-        f = open(filename, "wb")
-        f.writelines(self._lines)
-        f.close()
-
-
 class GitBlack:
     def __init__(self):
         self.repo = Repo(search_parent_directories=True)
@@ -354,82 +315,11 @@ class GitBlack:
                 author_date="{} {}".format(date_ts, date_tz),
             )
 
-    def commit_filename(self, filename):
-        with TemporaryDirectory(dir=".") as tmpdir:
-            tmpf = os.path.join(tmpdir, "b.py")
-
-            reformat(filename)
-
-            # why latin-1 ?
-            # The PatchSet object demands an encoding, even when I think
-            # it should treat its input as raw data with newlines, not text.
-            # so I use an 8 bit reversible encoding just to make it happy
-            # and I'll "encode" back to bytes when needed.
-            # Even if the input is UTF-8 or anything else, this should work.
-
-            patch_set = PatchSet(
-                Popen(["git", "diff", "-U0", filename], stdout=PIPE,).stdout,
-                encoding="latin-1",
-            )
-            original_lines = Popen(
-                ["git", "show", "HEAD:" + filename], stdout=PIPE
-            ).stdout.readlines()
-
-            if not patch_set.modified_files:
-                return
-
-            mf = patch_set.modified_files[0]
-
-            working_file = WorkingFile(original_lines, deltas)
-
-            grouped_deltas = {}
-            for delta_idx, commits in delta_commits.items():
-                t = tuple(sorted(commits))
-                grouped_deltas.setdefault(t, []).append(delta_idx)
-
-            for commit_hashes, delta_idxs in grouped_deltas.items():
-
-                for delta_idx in delta_idxs:
-                    working_file.apply(delta_idx)
-
-                working_file.write(tmpf)
-                self.repo.index.add(
-                    tmpf, path_rewriter=lambda entry: filename, write=True
-                )
-
-                commits = [self.repo.commit(h) for h in commit_hashes]
-
-                main_commit = commits[0]
-                commit_message = main_commit.message
-
-                if len(commits) > 1:
-                    # most recent commit
-                    main_commit = sorted(commits, key=lambda c: c.authored_datetime)[-1]
-
-                commit_message += (
-                    "\n\nautomatic commit by git-black, original commits:\n"
-                )
-                commit_message += "\n".join(["  {}".format(c.hexsha) for c in commits])
-
-                date_ts = main_commit.authored_date
-                date_tz = altz_to_utctz_str(main_commit.author_tz_offset)
-                self.repo.index.commit(
-                    commit_message,
-                    author=main_commit.author,
-                    author_date="{} {}".format(date_ts, date_tz),
-                )
-
-
-# def git_black(filename):
-#     gb.commit_filename(filename)
-
 
 @click.command()
-# @click.argument("filename")
 def cli():
     gb = GitBlack()
     gb.commit_changes()
-    # git_black(filename)
 
 
 if __name__ == "__main__":
