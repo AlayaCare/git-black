@@ -1,4 +1,5 @@
 import os
+import sys
 from bisect import bisect
 from collections import namedtuple
 from dataclasses import dataclass
@@ -86,10 +87,21 @@ class HunkBlamer:
             Popen(["git", "diff", "-U0", filename], stdout=PIPE,).stdout,
             encoding=self.PATCH_ENCODING,
         )
+
         self.modified_file = None
-        if not patch_set.modified_files:
+
+        if patch_set.modified_files:
+            self.modified_file = patch_set.modified_files[0]
+
+        # if a file only has deleted lines, unidiff thinks it was
+        # deleted; but if we got this far, it's because git
+        # showed it as a modified file
+        if patch_set.removed_files:
+            self.modified_file = patch_set.removed_files[0]
+
+        if not self.modified_file:
             return
-        self.modified_file = patch_set.modified_files[0]
+
         self._load_blame()
 
     def _load_blame(self):
@@ -279,6 +291,7 @@ class GitBlack:
         self.patchers = {}
 
     def commit_changes(self):
+        print("Reading changes...")
         grouped_deltas = {}
         for diff in self.repo.index.diff(None):
             if diff.change_type != "M":
@@ -290,11 +303,15 @@ class GitBlack:
                 commits = tuple(sorted(delta_blame.commits))
                 grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
 
+        total = len(grouped_deltas)
+        progress = 0
         for commits, deltas in grouped_deltas.items():
             self._commit(commits, deltas)
+            progress += 1
+            sys.stdout.write("Making commit {}/{} \r".format(progress, total))
+            sys.stdout.flush()
 
     def _commit(self, original_commits, deltas: List[Delta]):
-        print("comitting {}...".format(original_commits))
         with TemporaryDirectory(dir=".") as tmpdir:
 
             dirs = set(os.path.dirname(d.filename) for d in deltas)
