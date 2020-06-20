@@ -1,10 +1,13 @@
 import logging
+import re
 import sys
+import time
 from bisect import bisect
 from collections import namedtuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from subprocess import PIPE, Popen
 from typing import Dict, List, Tuple
 
 import click
@@ -96,18 +99,39 @@ class Delta:
 DeltaBlame = namedtuple("DeltaBlame", "delta commits")
 
 
+blame_re = re.compile(rb"^(?P<commit>[0-9a-f]{40}) (\d+) (?P<lineno>\d+).*")
+
+
 class HunkBlamer:
     def __init__(self, repo, patch: Patch):
         self.repo = repo
         self.patch = patch
         self.filename = patch.delta.old_file.path
-        self._load_blame()
+        # self._load_blame()
+        # self._blame_obj = self.repo.blame(self.filename)
+        self._load_blame_fast()
+
+    def _load_blame_fast(self):
+        # libgit2 blame is currently much much slower than calling an external
+        # git command: https://github.com/libgit2/libgit2/issues/3027
+
+        blame_proc = Popen(
+            ["git", "blame", "--porcelain", "HEAD", self.filename], stdout=PIPE
+        )
+        self._blame_map = {}
+        for line in blame_proc.stdout:
+            m = blame_re.match(line)
+            if not m:
+                continue
+            commit = m.group("commit").decode("ascii")
+            lineno = int(m.group("lineno"))
+            self._blame_map[lineno] = commit
 
     def _load_blame(self):
         _blame: List[Tuple[int, Oid]] = []
         for blame_hunk in self.repo.blame(self.filename):
             _blame.append(
-                (blame_hunk.final_start_line_number, blame_hunk.final_commit_id)
+                (blame_hunk.final_start_line_number, blame_hunk.final_commit_id.hex)
             )
         self._blame_starts = []
         self._blame_commits = []
@@ -115,9 +139,13 @@ class HunkBlamer:
             self._blame_starts.append(line)
             self._blame_commits.append(commit)
 
-    def _blame(self, lineno) -> Commit:
-        idx = bisect(self._blame_starts, lineno) - 1
-        return self.repo.get(self._blame_commits[idx])
+    def _blame(self, lineno) -> str:
+        # idx = bisect(self._blame_starts, lineno) - 1
+        # return self._blame_commits[idx]
+
+        # return self._blame_obj.for_line(lineno).final_commit_id.hex
+
+        return self._blame_map[lineno]
 
     def _map_lines(self, delta: Delta) -> Dict[Tuple, Tuple]:
         """
@@ -192,7 +220,7 @@ class HunkBlamer:
                 delta.old_start, delta.old_start + max(1, delta.old_length)
             ):
                 commit = self._blame(line)
-                delta_blame.commits.add(commit.hex)
+                delta_blame.commits.add(commit)
             blames.append(delta_blame)
 
         return blames
@@ -250,6 +278,7 @@ class GitBlack:
         self.patchers = {}
 
     def commit_changes(self):
+        start = time.monotonic()
         sys.stdout.write("Reading changes... ")
         sys.stdout.flush()
         grouped_deltas = {}
@@ -264,20 +293,33 @@ class GitBlack:
 
             filename = patch.delta.old_file.path
 
+            # print(filename)
+            # print("creating patcher")
             self.patchers[filename] = Patcher(self.repo, filename)
+            # print("creating blamer")
             hb = HunkBlamer(self.repo, patch)
+            # print("grouping")
             for delta_blame in hb.blames():
                 commits = tuple(sorted(delta_blame.commits))
                 grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
 
-        sys.stdout.write("done.\n")
+        secs = time.monotonic() - start
+        sys.stdout.write("done ({:.2f} secs).\n".format(secs))
+
+        start = time.monotonic()
         total = len(grouped_deltas)
         progress = 0
+        last_log = 0
         for commits, deltas in grouped_deltas.items():
             self._commit(commits, deltas)
             progress += 1
-            sys.stdout.write("Making commit {}/{} \r".format(progress, total))
-            sys.stdout.flush()
+            now = time.monotonic()
+            if now - last_log > 0.04:
+                sys.stdout.write("Making commit {}/{} \r".format(progress, total))
+                sys.stdout.flush()
+                last_log = now
+        secs = time.monotonic() - start
+        print("Making commit {}/{} ({:.2f} secs).".format(progress, total, secs))
 
     def _commit(self, original_commits, deltas: List[Delta]):
         filenames = set()
