@@ -1,83 +1,148 @@
 import os
-from subprocess import run
+from subprocess import PIPE, Popen, run
+from textwrap import dedent
 
+import py
 import pytest
 
-from git_black import Delta, GitBlack, git_black
-
-black_tests = b"""
-from collections import (
-        namedtuple
-)
+from git_black import Delta, GitBlack
 
 
-def func1(
-        a,
-        b):
-    pass
+@pytest.fixture
+def in_tmpdir(tmpdir):
+    with tmpdir.as_cwd():
+        yield tmpdir
 
-def func2():
+
+@pytest.fixture
+def tmp_repo(tmpdir):
+    with tmpdir.as_cwd():
+        run(["git", "init", "--quiet"])
+        yield tmpdir
+
+
+@pytest.fixture
+def unblacked_file(tmp_repo):
+    f = tmp_repo.join("unblacked_file.py")
+    f.write(
+        dedent(
+            """
+        from collections import (
+                namedtuple
+        )
+
+
+        def func1(
+                a,
+                b):
+            pass
+
+        def func2():
+            return [
+                'one',
+                'two',
+                'three',
+            ]
+
+        def func3():
+            return 3
+        def func4():
+            return 4
+
+        @property
+        def some_long_name(self):
+            if not self.condition:
+                return None
+            return self.some_long_value or \
+                (self.object1.property1.property2
+                if self.object1 and self.object1.property1 else None)
+
+
+
+
+        def func5():
+            pass
+
+
+
+
+        def func6():
+            pass
+        """
+        ).encode()
+    )
+    return f
+
+
+def git_add(path):
+    run(["git", "add", str(path)])
+
+
+def git_commit(msg):
+    run(["git", "commit", "-m", msg])
+
+
+def git_log():
     return [
-        'one',
-        'two',
-        'three',
+        line.decode().strip()
+        for line in Popen(["git", "log", r"--format=format:%s"], stdout=PIPE).stdout
     ]
 
-def func3():
-    return 3
-def func4():
-    return 4
 
-@property
-def some_long_name(self):
-    if not self.condition:
-        return None
-    return self.some_long_value or \
-           (self.object1.property1.property2
-        if self.object1 and self.object1.property1 else None)
+def git_black():
+    gb = GitBlack()
+    gb.commit_changes()
 
 
+def test_git_black(tmp_repo, unblacked_file):
 
+    git_add(unblacked_file)
+    git_commit("testing git-black")
 
-def func5():
-    pass
+    gb = GitBlack()
+    gb.commit_changes()
 
-
-
-
-def func6():
-    pass
-"""
-
-
-def test_git_black(tmpdir):
-    os.chdir(tmpdir)
-
-    with open("blacktests.py", "wb") as f:
-        f.write(black_tests)
-
-    run(["git", "init"])
-    run(["git", "add", "blacktests.py"])
-    run(["git", "commit", "-m", "testing git-black"])
-
-    git_black("blacktests.py")
-
-    log = run(["git", "log", r"--format=format:%s"], capture_output=True).stdout
-    assert log == (
-        b"testing git-black\ndelete-only commit by git-black\ntesting git-black"
-    )
+    log = git_log()
+    assert log == (["testing git-black", "testing git-black"])
     assert run(["black", "--check", "blacktests.py"]).returncode == 0
 
 
-@pytest.mark.parametrize(
-    ("src", "dst", "expected"),
-    [
-        ("abc", "abcde", [(0,), (1,), (2,), (2,), (2,)]),
-        ("abcde", "abc", [(0,), (1,), (2, 3, 4)]),
-        ("", "abc", [(), (), ()]),
-        ("abc", "", []),
-    ],
-)
-def test_delta_origins(src, dst, expected):
-    delta = Delta(src_start=0, src_lines=src, dst_start=0, dst_lines=dst)
-    assert GitBlack.compute_origin(delta) == expected
+def test_insert_only(tmp_repo):
+    a = py.path.local("a.py")
+    a.write(
+        dedent(
+            """
+            line1
+            line2
+            line3
+            """
+        )
+    )
+    git_add(a)
+    git_commit("commit1")
+
+    a.write(
+        dedent(
+            """
+            line1
+            """
+        )
+    )
+
+    git_black()
+
+    assert git_log() == ["commit2", "commit1"]
+
+
+# @pytest.mark.parametrize(
+#    ("src", "dst", "expected"),
+#    [
+#        ("abc", "abcde", [(0,), (1,), (2,), (2,), (2,)]),
+#        ("abcde", "abc", [(0,), (1,), (2, 3, 4)]),
+#        ("", "abc", [(), (), ()]),
+#        ("abc", "", []),
+#    ],
+# )
+# def test_delta_origins(src, dst, expected):
+#    delta = Delta(src_start=0, src_lines=src, dst_start=0, dst_lines=dst)
+#    assert GitBlack.compute_origin(delta) == expected
