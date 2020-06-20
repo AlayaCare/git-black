@@ -6,9 +6,7 @@ authors = ["Andy Teijelo <ateijelo@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.7"
-gitpython = "^3.1.2"
 click = "^7.1.2"
-unidiff = "^0.6.0"
 pygit2 = "^1.2.1"
 
 [tool.poetry.dev-dependencies]

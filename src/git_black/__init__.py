@@ -1,21 +1,13 @@
 import logging
-import os
 import sys
 from bisect import bisect
 from collections import namedtuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from importlib.resources import read_text
 from io import BytesIO
-from subprocess import PIPE, Popen, run
-from tempfile import TemporaryDirectory
 from typing import Dict, List, Tuple
 
 import click
-
-# from git import Commit, Repo
-from git.objects.util import altz_to_utctz_str
-from jinja2 import Environment, FunctionLoader
 from pygit2 import (
     GIT_DELTA_MODIFIED,
     GIT_DIFF_IGNORE_SUBMODULES,
@@ -33,21 +25,6 @@ from pygit2 import (
     Repository,
     Signature,
 )
-
-# from unidiff import Hunk, PatchSet
-
-
-# def load_template(template):
-#     return read_text(__package__, template, "utf-8")
-
-
-# jinja_env = Environment(loader=FunctionLoader(load_template))
-# jinja_env.filters["zip"] = zip
-
-
-# def reformat(a):
-#     run(["black", "-l89", a])
-
 
 logger = logging.getLogger(__name__)
 
@@ -79,16 +56,7 @@ class Delta:
 
     @property
     def offset(self):
-        # return len(self.new_lines) - len(self.old_lines)
         return self.new_length - self.old_length
-
-    # @property
-    # def src_length(self):
-    #     return len(self.old_lines)
-
-    # @property
-    # def dst_length(self):
-    #     return len(self.new_lines)
 
     @staticmethod
     def from_hunk(hunk: DiffHunk, filename):
@@ -129,31 +97,10 @@ DeltaBlame = namedtuple("DeltaBlame", "delta commits")
 
 
 class HunkBlamer:
-    # PATCH_ENCODING = "latin-1"
-
     def __init__(self, repo, patch: Patch):
         self.repo = repo
         self.patch = patch
         self.filename = patch.delta.old_file.path
-        # patch_set = PatchSet(
-        #    Popen(["git", "diff", "-U0", filename], stdout=PIPE,).stdout,
-        #    encoding=self.PATCH_ENCODING,
-        # )
-
-        # self.modified_file = None
-
-        # if patch_set.modified_files:
-        #     self.modified_file = patch_set.modified_files[0]
-
-        # # # if a file only has deleted lines, unidiff thinks it was
-        # # # deleted; but if we got this far, it's because git
-        # # # showed it as a modified file
-        # # if patch_set.removed_files:
-        # #     self.modified_file = patch_set.removed_files[0]
-
-        # if not self.modified_file:
-        #     return
-
         self._load_blame()
 
     def _load_blame(self):
@@ -162,12 +109,6 @@ class HunkBlamer:
             _blame.append(
                 (blame_hunk.final_start_line_number, blame_hunk.final_commit_id)
             )
-        # sorted(
-        #    [
-        #        (e.linenos.start, e.commit)
-        #        for e in self.repo.blame_incremental("HEAD", self.modified_file.path)
-        #    ]
-        # )
         self._blame_starts = []
         self._blame_commits = []
         for line, commit in _blame:
@@ -219,9 +160,6 @@ class HunkBlamer:
         return result
 
     def blames(self) -> List[DeltaBlame]:
-        # if not self.modified_file:
-        #     return []
-
         hunk_deltas = [
             Delta.from_hunk(hunk, self.filename) for hunk in self.patch.hunks
         ]
@@ -274,7 +212,6 @@ class Patcher:
         for component in self.filename.split("/"):
             obj = obj / component
         self._lines = BytesIO(obj.data).readlines()
-        # self._lines = [(line + b"\n") for line in obj.data.split(b"\n")]
 
     def apply(self, delta: Delta):
         if (delta.old_start) in self._applied:
@@ -299,11 +236,6 @@ class Patcher:
 
         self._applied.add(delta.old_start)
 
-    # def write(self, filename):
-    #     f = open(filename, "wb")
-    #     f.writelines(self._lines)
-    #     f.close()
-
     def content(self):
         return b"".join(self._lines)
 
@@ -315,12 +247,6 @@ class GitIndexNotEmpty(Exception):
 class GitBlack:
     def __init__(self):
         self.repo = Repository(".")
-        # self.repo = Repo(search_parent_directories=True)
-        # self._blame_starts = {}
-        # self._blame_commits = {}
-        # self.a_html = []
-        # self.b_html = []
-        # self.color_idx = 0
         self.patchers = {}
 
     def commit_changes(self):
@@ -335,26 +261,8 @@ class GitBlack:
         for patch in self.repo.diff(context_lines=0, flags=GIT_DIFF_IGNORE_SUBMODULES):
             if patch.delta.status != GIT_DELTA_MODIFIED:
                 continue
-            #            for hunk in patch.hunks:
-            #                print("hunk:", hunk)
-            #                print("new_lines:", hunk.new_lines)
-            #                print("old_lines:", hunk.old_lines)
-            #                print("new_start:", hunk.new_start)
-            #                print("new_start:", hunk.new_start)
-
-            #        for diff in self.repo.index.diff(None):
-            #            if diff.change_type != "M":
-            #                continue
 
             filename = patch.delta.old_file.path
-            # blame = self.repo.blame(filename)
-
-            # for blame_hunk in blame:
-            #     print(
-            #         blame_hunk.final_commit_id,
-            #         blame_hunk.final_start_line_number,
-            #         blame_hunk.lines_in_hunk,
-            #     )
 
             self.patchers[filename] = Patcher(self.repo, filename)
             hb = HunkBlamer(self.repo, patch)
@@ -372,19 +280,13 @@ class GitBlack:
             sys.stdout.flush()
 
     def _commit(self, original_commits, deltas: List[Delta]):
-        # self.repo.index.read()
-
         filenames = set()
         for delta in deltas:
             self.patchers[delta.filename].apply(delta)
             filenames.add(delta.filename)
 
         for filename in filenames:
-            # tmpf = os.path.join(tmpdir, filename)
-            # self.patchers[filename].write(tmpf)
-
             blob_id = self.repo.create_blob(self.patchers[filename].content())
-            # b = repo[blob_id]
             index_entry = IndexEntry(filename, blob_id, GIT_FILEMODE_BLOB)
             self.repo.index.add(index_entry)
 
@@ -409,45 +311,6 @@ class GitBlack:
         self.repo.create_commit(
             "HEAD", main_commit.author, committer, commit_message, tree, [head.id]
         )
-        # self.repo.state_cleanup()
-
-    # def _old_commit(self, original_commits, deltas: List[Delta]):
-    #     with TemporaryDirectory(dir=".") as tmpdir:
-
-    #         dirs = set(os.path.dirname(d.filename) for d in deltas)
-    #         for d in dirs:
-    #             os.makedirs(os.path.join(tmpdir, d), exist_ok=True)
-
-    #         filenames = set()
-    #         for delta in deltas:
-    #             self.patchers[delta.filename].apply(delta)
-    #             filenames.add(delta.filename)
-
-    #         for filename in filenames:
-    #             tmpf = os.path.join(tmpdir, filename)
-    #             self.patchers[filename].write(tmpf)
-    #             self.repo.index.add(tmpf, path_rewriter=lambda entry: filename)
-
-    #         commits = [self.repo.commit(h) for h in original_commits]
-
-    #         main_commit = commits[0]
-    #         commit_message = main_commit.message
-
-    #         if len(commits) > 1:
-    #             # most recent commit
-    #             main_commit = sorted(commits, key=lambda c: c.authored_datetime)[-1]
-
-    #         commit_message += "\n\nautomatic commit by git-black, original commits:\n"
-    #         commit_message += "\n".join(["  {}".format(c.hexsha) for c in commits])
-
-    #         date_ts = main_commit.authored_date
-    #         date_tz = altz_to_utctz_str(main_commit.author_tz_offset)
-    #         self.repo.index.write()
-    #         self.repo.index.commit(
-    #             commit_message,
-    #             author=main_commit.author,
-    #             author_date="{} {}".format(date_ts, date_tz),
-    #         )
 
 
 @click.command()
