@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from subprocess import PIPE, Popen
+from threading import Lock
 from typing import Dict, List, Tuple
 
 import click
@@ -115,9 +116,9 @@ class HunkBlamer:
         self.filename = patch.delta.old_file.path
         # self._load_blame()
         # self._blame_obj = self.repo.blame(self.filename)
-        self._load_blame_fast()
+        self._load_blame()
 
-    def _load_blame_fast(self):
+    def _load_blame(self):
         # libgit2 blame is currently much much slower than calling an external
         # git command: https://github.com/libgit2/libgit2/issues/3027
 
@@ -133,24 +134,7 @@ class HunkBlamer:
             lineno = int(m.group("lineno"))
             self._blame_map[lineno] = commit
 
-    def _load_blame(self):
-        _blame: List[Tuple[int, Oid]] = []
-        for blame_hunk in self.repo.blame(self.filename):
-            _blame.append(
-                (blame_hunk.final_start_line_number, blame_hunk.final_commit_id.hex)
-            )
-        self._blame_starts = []
-        self._blame_commits = []
-        for line, commit in _blame:
-            self._blame_starts.append(line)
-            self._blame_commits.append(commit)
-
     def _blame(self, lineno) -> str:
-        # idx = bisect(self._blame_starts, lineno) - 1
-        # return self._blame_commits[idx]
-
-        # return self._blame_obj.for_line(lineno).final_commit_id.hex
-
         return self._blame_map[lineno]
 
     def _map_lines(self, delta: Delta) -> Dict[Tuple, Tuple]:
@@ -206,16 +190,16 @@ class HunkBlamer:
             for old_linenos, new_linenos in self._map_lines(hd).items():
                 old_start = hd.old_start + min(old_linenos, default=0)
                 old_lines = [hd.old_lines[lineno] for lineno in old_linenos]
-                ns = hd.new_start + min(new_linenos, default=0)
-                nl = [hd.new_lines[lineno] for lineno in new_linenos]
+                new_start = hd.new_start + min(new_linenos, default=0)
+                new_lines = [hd.new_lines[lineno] for lineno in new_linenos]
                 delta = Delta(
                     filename=self.filename,
                     old_start=old_start,
                     old_lines=old_lines,
                     old_length=len(old_linenos),
-                    new_start=ns,
-                    new_lines=nl,
-                    new_length=len(nl),
+                    new_start=new_start,
+                    new_lines=new_lines,
+                    new_length=len(new_lines),
                 )
                 deltas.append(delta)
 
@@ -309,21 +293,23 @@ class GitBlack:
             if status & index_statuses:
                 raise GitIndexNotEmpty
 
-        patches = list(
-            self.repo.diff(context_lines=0, flags=GIT_DIFF_IGNORE_SUBMODULES)
-        )
+        patches = []
+        self._file_modes = {}
+        diff = self.repo.diff(context_lines=0, flags=GIT_DIFF_IGNORE_SUBMODULES)
+        for patch in diff:
+            if patch.delta.status != GIT_DELTA_MODIFIED:
+                continue
+            self._file_modes[patch.delta.old_file.path] = patch.delta.old_file.mode
+            patches.append(patch)
+
         self.progress = 0
         self.last_log = 0
-        self.total = len(p for p in patches if p.delta.status != GIT_DELTA_MODIFIED)
+        self.total = len(patches)
 
         executor = ThreadPoolExecutor(max_workers=8)
         tasks = set()
         for patch in patches:
-            if patch.delta.status != GIT_DELTA_MODIFIED:
-                continue
-
             tasks.add(executor.submit(self.get_blamed_deltas, patch))
-
             if len(tasks) > 8:
                 done, not_done = wait(tasks, return_when=FIRST_COMPLETED)
                 for task in done:
@@ -344,30 +330,33 @@ class GitBlack:
         self.total = len(self.grouped_deltas)
         self.progress = 0
         self.last_log = 0
+
         for commits, deltas in self.grouped_deltas.items():
-            self._commit(commits, deltas)
-            self.progress += 1
-            now = time.monotonic()
-            if now - self.last_log > 0.04:
-                sys.stdout.write(
-                    "Making commit {}/{} \r".format(self.progress, self.total)
-                )
-                sys.stdout.flush()
-                self.last_log = now
+            blobs = self._create_blobs(deltas)
+            self._commit(commits, blobs)
+
         secs = time.monotonic() - start
         print(
             "Making commit {}/{} ({:.2f} secs).".format(self.progress, self.total, secs)
         )
 
-    def _commit(self, original_commits, deltas: List[Delta]):
+    def _create_blobs(self, deltas):
         filenames = set()
         for delta in deltas:
             self.patchers[delta.filename].apply(delta)
             filenames.add(delta.filename)
 
+        blobs = {}
         for filename in filenames:
             blob_id = self.repo.create_blob(self.patchers[filename].content())
-            index_entry = IndexEntry(filename, blob_id, GIT_FILEMODE_BLOB)
+            blobs[filename] = blob_id
+
+        return blobs
+
+    def _commit(self, original_commits, blobs):
+        for filename, blob_id in blobs.items():
+            file_mode = self._file_modes[filename]
+            index_entry = IndexEntry(filename, blob_id, file_mode)
             self.repo.index.add(index_entry)
 
         commits = [self.repo.get(h) for h in original_commits]
@@ -391,6 +380,12 @@ class GitBlack:
         self.repo.create_commit(
             "HEAD", main_commit.author, committer, commit_message, tree, [head.id]
         )
+        self.progress += 1
+        now = time.monotonic()
+        if now - self.last_log > 0.04:
+            sys.stdout.write("Making commit {}/{} \r".format(self.progress, self.total))
+            sys.stdout.flush()
+            self.last_log = now
 
 
 @click.command()
