@@ -289,7 +289,7 @@ class GitBlack:
         hb = HunkBlamer(self.repo, patch)
         return hb.blames()
 
-    def group_blames_deltas(self, blames):
+    def group_blame_deltas(self, blames):
         for delta_blame in blames:
             commits = tuple(sorted(delta_blame.commits))
             self.grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
@@ -314,7 +314,7 @@ class GitBlack:
         )
         self.progress = 0
         self.last_log = 0
-        self.total = len(patches)
+        self.total = len(p for p in patches if p.delta.status != GIT_DELTA_MODIFIED)
 
         executor = ThreadPoolExecutor(max_workers=8)
         tasks = set()
@@ -327,11 +327,11 @@ class GitBlack:
             if len(tasks) > 8:
                 done, not_done = wait(tasks, return_when=FIRST_COMPLETED)
                 for task in done:
-                    self.group_blames_deltas(task.result())
+                    self.group_blame_deltas(task.result())
                 tasks -= set(done)
 
         for task in tasks:
-            self.group_blames_deltas(task.result())
+            self.group_blame_deltas(task.result())
 
         secs = time.monotonic() - start
         sys.stdout.write(
