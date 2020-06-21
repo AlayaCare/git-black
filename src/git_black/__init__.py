@@ -4,6 +4,12 @@ import sys
 import time
 from bisect import bisect
 from collections import namedtuple
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait,
+)
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -277,9 +283,27 @@ class GitBlack:
         self.repo = Repository(".")
         self.patchers = {}
 
+    def get_blamed_deltas(self, patch):
+        filename = patch.delta.old_file.path
+        self.patchers[filename] = Patcher(self.repo, filename)
+        hb = HunkBlamer(self.repo, patch)
+        return hb.blames()
+
+    def group_blames_deltas(self, blames):
+        for delta_blame in blames:
+            commits = tuple(sorted(delta_blame.commits))
+            self.grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
+
+        self.progress += 1
+        now = time.monotonic()
+        if now - self.last_log > 0.04:
+            sys.stdout.write("Reading file {}/{} \r".format(self.progress, self.total))
+            sys.stdout.flush()
+            self.last_log = now
+
     def commit_changes(self):
         start = time.monotonic()
-        grouped_deltas = {}
+        self.grouped_deltas = {}
 
         for path, status in self.repo.status().items():
             if status & index_statuses:
@@ -288,51 +312,52 @@ class GitBlack:
         patches = list(
             self.repo.diff(context_lines=0, flags=GIT_DIFF_IGNORE_SUBMODULES)
         )
-        progress = 0
-        last_log = 0
-        total = len(patches)
+        self.progress = 0
+        self.last_log = 0
+        self.total = len(patches)
+
+        executor = ThreadPoolExecutor(max_workers=8)
+        tasks = set()
         for patch in patches:
             if patch.delta.status != GIT_DELTA_MODIFIED:
                 continue
 
-            filename = patch.delta.old_file.path
+            tasks.add(executor.submit(self.get_blamed_deltas, patch))
 
-            # print(filename)
-            # print("creating patcher")
-            self.patchers[filename] = Patcher(self.repo, filename)
-            # print("creating blamer")
-            hb = HunkBlamer(self.repo, patch)
-            # print("grouping")
-            for delta_blame in hb.blames():
-                commits = tuple(sorted(delta_blame.commits))
-                grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
+            if len(tasks) > 8:
+                done, not_done = wait(tasks, return_when=FIRST_COMPLETED)
+                for task in done:
+                    self.group_blames_deltas(task.result())
+                tasks -= set(done)
 
-            progress += 1
-            now = time.monotonic()
-            if now - last_log > 0.04:
-                sys.stdout.write("Reading file {}/{} \r".format(progress, total))
-                sys.stdout.flush()
-                last_log = now
+        for task in tasks:
+            self.group_blames_deltas(task.result())
 
         secs = time.monotonic() - start
         sys.stdout.write(
-            "Reading file {}/{} ({:.2f} secs).\n".format(progress, total, secs)
+            "Reading file {}/{} ({:.2f} secs).\n".format(
+                self.progress, self.total, secs
+            )
         )
 
         start = time.monotonic()
-        total = len(grouped_deltas)
-        progress = 0
-        last_log = 0
-        for commits, deltas in grouped_deltas.items():
+        self.total = len(self.grouped_deltas)
+        self.progress = 0
+        self.last_log = 0
+        for commits, deltas in self.grouped_deltas.items():
             self._commit(commits, deltas)
-            progress += 1
+            self.progress += 1
             now = time.monotonic()
-            if now - last_log > 0.04:
-                sys.stdout.write("Making commit {}/{} \r".format(progress, total))
+            if now - self.last_log > 0.04:
+                sys.stdout.write(
+                    "Making commit {}/{} \r".format(self.progress, self.total)
+                )
                 sys.stdout.flush()
-                last_log = now
+                self.last_log = now
         secs = time.monotonic() - start
-        print("Making commit {}/{} ({:.2f} secs).".format(progress, total, secs))
+        print(
+            "Making commit {}/{} ({:.2f} secs).".format(self.progress, self.total, secs)
+        )
 
     def _commit(self, original_commits, deltas: List[Delta]):
         filenames = set()
