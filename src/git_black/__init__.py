@@ -279,15 +279,19 @@ class GitBlack:
 
     def commit_changes(self):
         start = time.monotonic()
-        sys.stdout.write("Reading changes... ")
-        sys.stdout.flush()
         grouped_deltas = {}
 
         for path, status in self.repo.status().items():
             if status & index_statuses:
                 raise GitIndexNotEmpty
 
-        for patch in self.repo.diff(context_lines=0, flags=GIT_DIFF_IGNORE_SUBMODULES):
+        patches = list(
+            self.repo.diff(context_lines=0, flags=GIT_DIFF_IGNORE_SUBMODULES)
+        )
+        progress = 0
+        last_log = 0
+        total = len(patches)
+        for patch in patches:
             if patch.delta.status != GIT_DELTA_MODIFIED:
                 continue
 
@@ -303,8 +307,17 @@ class GitBlack:
                 commits = tuple(sorted(delta_blame.commits))
                 grouped_deltas.setdefault(commits, []).append(delta_blame.delta)
 
+            progress += 1
+            now = time.monotonic()
+            if now - last_log > 0.04:
+                sys.stdout.write("Reading file {}/{} \r".format(progress, total))
+                sys.stdout.flush()
+                last_log = now
+
         secs = time.monotonic() - start
-        sys.stdout.write("done ({:.2f} secs).\n".format(secs))
+        sys.stdout.write(
+            "Reading file {}/{} ({:.2f} secs).\n".format(progress, total, secs)
+        )
 
         start = time.monotonic()
         total = len(grouped_deltas)
