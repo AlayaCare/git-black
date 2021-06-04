@@ -1,5 +1,7 @@
 # Git Black
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Reformat your source code without losing git's history
 
 ### Purpose
