@@ -5,7 +5,7 @@ description = ""
 authors = ["Andy Teijelo <ateijelo@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.8"
 click = "^7.1.2"
 pygit2 = "^1.2.1"
 
