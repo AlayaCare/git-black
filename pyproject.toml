@@ -5,15 +5,15 @@ description = ""
 authors = ["Andy Teijelo <ateijelo@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.8"
 click = "^7.1.2"
 pygit2 = "^1.2.1"
 
 [tool.poetry.dev-dependencies]
-flake8 = "^3.8.2"
+flake8 = ">=3.8.2,<8"
 jinja2 = "^2.11.2"
-black = "^19.10b0"
-pytest = "^5.4.3"
+black = ">=19.10b0,<24"
+pytest = ">=5.4.3,<8"
 
 [tool.poetry.scripts]
 "git-black" = "git_black:cli"
