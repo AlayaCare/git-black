@@ -12,7 +12,7 @@ pygit2 = "^1.2.1"
 [tool.poetry.dev-dependencies]
 flake8 = "^3.8.2"
 jinja2 = "^2.11.2"
-black = "^19.10b0"
+black = ">=19.10b0,<24"
 pytest = "^5.4.3"
 
 [tool.poetry.scripts]
