@@ -16,7 +16,7 @@ The goal is to adopt a consistent code style, but keeping `git blame` useful.
 In a Python virtualenv:
 
 ```bash
-$ export PIP_EXTRA_INDEX_URL=https://nexus.alayacare.net/repository/pypi/simple
+$ export PIP_EXTRA_INDEX_URL=<See docs for internal package registry>
 $ pip install -U pip         # pygit2 has a problem with pip <= 18.1
 $ pip install git-black
 ```
